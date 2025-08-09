@@ -22,8 +22,8 @@ module.exports = async (req, res) => {
       payment_method_types: ['card'],
       customer_creation: 'always',
       customer_email: customerEmail || undefined,
-      success_url: success_url || 'https://www.wipeuranus.com/success?session_id={CHECKOUT_SESSION_ID}',
-      cancel_url:  cancel_url  || 'https://www.wipeuranus.com/cancel',
+      success_url: success_url || 'https://www.wipeuranus.com/#success?session_id={CHECKOUT_SESSION_ID}',
+      cancel_url:  cancel_url  || 'https://www.wipeuranus.com/#cancel',
       metadata: {
         priceId: String(priceId || ''),
         packSize: String(packSize || ''),
