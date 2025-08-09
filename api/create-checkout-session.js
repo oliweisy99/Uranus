@@ -36,7 +36,7 @@ module.exports = async (req, res) => {
         submit: {
           message: `Saving a card for Uranus – ${packSize} rolls (${mode}${mode==='subscription' ? `, ${req.body.peopleKey||deliveryKeyHere}` : ''}).`
         }
-      }
+      },
       metadata: {
         priceId: String(priceId || ''),
         packSize: String(packSize || ''),
