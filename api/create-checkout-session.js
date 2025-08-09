@@ -5,7 +5,6 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-06-
 const ALLOWED_ORIGINS = new Set([
   'https://wipeuranus.com',
   'https://www.wipeuranus.com',
-  // during testing you can add your preview domains:
   'https://uranus-azure.vercel.app'
 ]);
 
@@ -14,8 +13,6 @@ module.exports = async (req, res) => {
   if (ALLOWED_ORIGINS.has(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
   }
-  // (or use '*' while testing if you’re not sending credentials)
-
   res.setHeader('Vary', 'Origin');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -27,8 +24,9 @@ module.exports = async (req, res) => {
   try {
     const { priceId, packSize, mode, customerEmail, success_url, cancel_url } = req.body || {};
 
-    const session = await stripe.checkout.sessions.create({
-      mode: 'setup', // saving a card only
+    // Build ONLY setup-safe params
+    const params = {
+      mode: 'setup',
       customer_creation: 'always',
       customer_email: customerEmail || undefined,
       success_url: success_url || 'https://wipeuranus.com/#success?session_id={CHECKOUT_SESSION_ID}',
@@ -38,11 +36,16 @@ module.exports = async (req, res) => {
         packSize: String(packSize || ''),
         plan: String(mode || ''),
       },
-    });
+    };
 
+    console.log('Creating setup Checkout Session with params:', params); // helpful sanity log
+
+    const session = await stripe.checkout.sessions.create(params);
+
+    res.setHeader('Content-Type', 'application/json');
     return res.status(200).json({ url: session.url });
   } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: 'Failed to create checkout session' });
+    console.error('Stripe error:', err);
+    return res.status(500).json({ error: err.message || 'Failed to create checkout session' });
   }
 };
