@@ -1,0 +1,10 @@
+{
+  "name": "uranus-serverless",
+  "version": "1.0.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "stripe": "^14.25.0"
+  }
+}
