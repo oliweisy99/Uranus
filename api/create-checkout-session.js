@@ -3,8 +3,9 @@ const Stripe = require('stripe');
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-06-20' });
 
 module.exports = async (req, res) => {
-  // Basic CORS (so Carrd / other origins can call this)
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  // CORS for wipeuranus.com (loosen to * if you like)
+  res.setHeader('Access-Control-Allow-Origin', 'https://www.wipeuranus.com');
+  res.setHeader('Vary', 'Origin');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
@@ -12,37 +13,27 @@ module.exports = async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
-    const {
-      priceId,          // your “display choice” – we store it as metadata (not charged in setup mode)
-      packSize,
-      mode,             // 'subscription' or 'payment' – informational only for setup
-      delivery,         // e.g., "4 months: ~ 1–2 people"
-      customerEmail,    // optional
-      successUrl,       // optional override from client
-      cancelUrl         // optional override from client
-    } = req.body || {};
+    const { priceId, packSize, mode, customerEmail, success_url, cancel_url } = req.body || {};
 
-    // IMPORTANT: Checkout 'setup' mode doesn't accept line_items.
-    // It's only for collecting a payment method.
+    // IMPORTANT: Checkout 'setup' mode does not support line_items.
+    // Just create the session to save a card to a customer.
     const session = await stripe.checkout.sessions.create({
       mode: 'setup',
       payment_method_types: ['card'],
       customer_creation: 'always',
       customer_email: customerEmail || undefined,
-      success_url: (successUrl || 'https://wipeuranus.com') + '/success?session_id={CHECKOUT_SESSION_ID}',
-      cancel_url: (cancelUrl || 'https://wipeuranus.com') + '/cancel',
-      // Store what the user chose so you can fulfill later from your webhook/db
+      success_url: success_url || 'https://www.wipeuranus.com/success?session_id={CHECKOUT_SESSION_ID}',
+      cancel_url:  cancel_url  || 'https://www.wipeuranus.com/cancel',
       metadata: {
         priceId: String(priceId || ''),
         packSize: String(packSize || ''),
-        planMode: String(mode || ''),        // avoid 'mode' key name collision
-        delivery: String(delivery || '')
-      }
+        plan: String(mode || ''),
+      },
     });
 
-    res.status(200).json({ url: session.url });
+    return res.status(200).json({ url: session.url });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Failed to create checkout session' });
+    return res.status(500).json({ error: 'Failed to create checkout session' });
   }
 };
