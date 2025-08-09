@@ -32,6 +32,11 @@ module.exports = async (req, res) => {
       customer_email: customerEmail || undefined,
       success_url: success_url || 'https://wipeuranus.com/#success?session_id={CHECKOUT_SESSION_ID}',
       cancel_url:  cancel_url  || 'https://wipeuranus.com/#cancel',
+      custom_text: {
+        submit: {
+          message: `Saving a card for Uranus – ${packSize} rolls (${mode}${mode==='subscription' ? `, ${req.body.peopleKey||deliveryKeyHere}` : ''}).`
+        }
+      }
       metadata: {
         priceId: String(priceId || ''),
         packSize: String(packSize || ''),
