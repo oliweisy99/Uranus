@@ -27,6 +27,7 @@ module.exports = async (req, res) => {
     // Build ONLY setup-safe params
     const params = {
       mode: 'setup',
+      payment_method_types: ['card'],  
       customer_creation: 'always',
       customer_email: customerEmail || undefined,
       success_url: success_url || 'https://wipeuranus.com/#success?session_id={CHECKOUT_SESSION_ID}',
