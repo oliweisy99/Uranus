@@ -1,8 +1,9 @@
+// /api/create-checkout-session.js
 const Stripe = require('stripe');
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-06-20' });
 
 module.exports = async (req, res) => {
-  // Basic CORS so Carrd can POST to this endpoint
+  // Basic CORS (so Carrd / other origins can call this)
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -11,29 +12,32 @@ module.exports = async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
-    const { priceId, packSize, mode, customerEmail } = req.body || {};
+    const {
+      priceId,          // your “display choice” – we store it as metadata (not charged in setup mode)
+      packSize,
+      mode,             // 'subscription' or 'payment' – informational only for setup
+      delivery,         // e.g., "4 months: ~ 1–2 people"
+      customerEmail,    // optional
+      successUrl,       // optional override from client
+      cancelUrl         // optional override from client
+    } = req.body || {};
 
+    // IMPORTANT: Checkout 'setup' mode doesn't accept line_items.
+    // It's only for collecting a payment method.
     const session = await stripe.checkout.sessions.create({
-      mode: 'setup',                       // <-- saves card, does NOT charge
+      mode: 'setup',
       payment_method_types: ['card'],
       customer_creation: 'always',
       customer_email: customerEmail || undefined,
-      success_url: 'https://wipeUranus.com/#success?session_id={CHECKOUT_SESSION_ID}',
-      cancel_url: 'https://wipeUranus.com/#cancel',
+      success_url: (successUrl || 'https://uranus-crwzp9r7l-oliweisy99s-projects.vercel.app') + '/success?session_id={CHECKOUT_SESSION_ID}',
+      cancel_url: (cancelUrl || 'https://uranus-crwzp9r7l-oliweisy99s-projects.vercel.app') + '/cancel',
+      // Store what the user chose so you can fulfill later from your webhook/db
       metadata: {
         priceId: String(priceId || ''),
         packSize: String(packSize || ''),
-        plan: String(mode || ''),
-      },
-      // Optional: show what they picked in Checkout (visual only; £0.00)
-      line_items: [{
-        price_data: {
-          currency: 'gbp',
-          product_data: { name: `Uranus – ${packSize || ''} rolls (${mode || 'preorder'})` },
-          unit_amount: 0,
-        },
-        quantity: 1,
-      }],
+        planMode: String(mode || ''),        // avoid 'mode' key name collision
+        delivery: String(delivery || '')
+      }
     });
 
     res.status(200).json({ url: session.url });
