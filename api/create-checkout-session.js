@@ -29,8 +29,8 @@ module.exports = async (req, res) => {
       payment_method_types: ['card'],
       customer_creation: 'always',
       customer_email: customerEmail || undefined,
-      success_url: (successUrl || 'https://uranus-crwzp9r7l-oliweisy99s-projects.vercel.app') + '/success?session_id={CHECKOUT_SESSION_ID}',
-      cancel_url: (cancelUrl || 'https://uranus-crwzp9r7l-oliweisy99s-projects.vercel.app') + '/cancel',
+      success_url: (successUrl || 'https://wipeuranus.com') + '/success?session_id={CHECKOUT_SESSION_ID}',
+      cancel_url: (cancelUrl || 'https://wipeuranus.com') + '/cancel',
       // Store what the user chose so you can fulfill later from your webhook/db
       metadata: {
         priceId: String(priceId || ''),
