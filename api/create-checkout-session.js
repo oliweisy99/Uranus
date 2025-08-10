@@ -43,6 +43,7 @@ module.exports = async (req, res) => {
       customer_email: customerEmail || undefined,
       success_url: success_url || 'https://wipeuranus.com/#success?session_id={CHECKOUT_SESSION_ID}',
       cancel_url:  cancel_url  || 'https://wipeuranus.com/#cancel',
+      allow_promotion_codes: true,
       metadata,
       custom_text: { submit: { message: `Uranus – ${packSize || ''} rolls (${mode}${peopleKey ? `, ${peopleKey}` : ''})` } },
     };
