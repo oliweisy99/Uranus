@@ -8,7 +8,8 @@ const ALLOWED_ORIGINS = new Set([
 ]);
 
 module.exports = async (req, res) => {
-  
+  const origin = req.headers.origin;
+
   if (ALLOWED_ORIGINS.has(origin)) res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Vary', 'Origin');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
