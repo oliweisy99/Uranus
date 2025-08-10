@@ -43,6 +43,7 @@ module.exports = async (req, res) => {
         plan: String(mode || ''),
         peopleKey: String(peopleKey || ''),
       },
+      setup_intent_data: { metadata }, 
     };
 
     console.log('Creating setup Checkout Session with params:', params); // helpful sanity log
