@@ -46,7 +46,6 @@ module.exports = async (req, res) => {
       allow_promotion_codes: true,
       shipping_address_collection: { allowed_countries: ['GB'] },
       billing_address_collection: 'required',
-      customer_update: { name: 'auto', address: 'auto', shipping: 'auto' },
       metadata,
       custom_text: { submit: { message: `Uranus – ${packSize || ''} rolls (${mode}${peopleKey ? `, ${peopleKey}` : ''})` } },
     };
