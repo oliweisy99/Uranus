@@ -39,10 +39,23 @@ module.exports = async (req, res) => {
       peopleKey: String(peopleKey || ''),
     };
 
+// pick the same domain the request came from (handles www vs non-www)
+    const siteOrigin = (ALLOWED_ORIGINS.has(origin) ? origin : 'https://wipeuranus.com').replace(/\/$/, '');
+    
+    const DEFAULT_SUCCESS = `${siteOrigin}/?session_id={CHECKOUT_SESSION_ID}#success`;
+    const DEFAULT_CANCEL  = `${siteOrigin}/#cancel`;
+    
+    // force a success url that contains the token, even if client sends one
+    const successUrl = (success_url && success_url.includes('{CHECKOUT_SESSION_ID}'))
+      ? success_url
+      : DEFAULT_SUCCESS;
+    
+    const cancelUrl = cancel_url || DEFAULT_CANCEL;
+    
     const base = {
       customer_email: customerEmail || undefined,
-      success_url: success_url || 'https://wipeuranus.com/#success?session_id={CHECKOUT_SESSION_ID}',
-      cancel_url:  cancel_url  || 'https://wipeuranus.com/#cancel',
+      success_url: successUrl,
+      cancel_url:  cancelUrl,
       allow_promotion_codes: true,
       shipping_address_collection: { allowed_countries: ['GB'] },
       billing_address_collection: 'required',
@@ -68,12 +81,6 @@ module.exports = async (req, res) => {
         subscription_data: { metadata },
       };
     }
-
-    console.log('Creating Checkout Session with params:', {
-      ...params,
-      // avoid logging full PII
-      customer_email: params.customer_email ? '[present]' : undefined
-    });
     
     // Build ONLY setup-safe params
     // const params = {
@@ -91,8 +98,6 @@ module.exports = async (req, res) => {
     //   metadata,
     //   setup_intent_data: { metadata }, 
     // };
-
-    console.log('Creating setup Checkout Session with params:', params); // helpful sanity log
 
     const session = await stripe.checkout.sessions.create(params);
 
