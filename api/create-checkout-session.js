@@ -1,6 +1,7 @@
 // /api/create-checkout-session.js
 const Stripe = require('stripe');
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY_TEST, { apiVersion: '2024-06-20' });
+// const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-06-20' });
 
 const ALLOWED_ORIGINS = new Set([
   'https://wipeuranus.com',
