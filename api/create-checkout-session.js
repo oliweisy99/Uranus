@@ -44,6 +44,9 @@ module.exports = async (req, res) => {
       success_url: success_url || 'https://wipeuranus.com/#success?session_id={CHECKOUT_SESSION_ID}',
       cancel_url:  cancel_url  || 'https://wipeuranus.com/#cancel',
       allow_promotion_codes: true,
+      shipping_address_collection: { allowed_countries: ['GB'] },
+      billing_address_collection: 'required',
+      customer_update: { name: 'auto', address: 'auto', shipping: 'auto' },
       metadata,
       custom_text: { submit: { message: `Uranus – ${packSize || ''} rolls (${mode}${peopleKey ? `, ${peopleKey}` : ''})` } },
     };
