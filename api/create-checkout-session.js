@@ -22,7 +22,7 @@ module.exports = async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
-    const { priceId, packSize, mode, customerEmail, success_url, cancel_url } = req.body || {};
+    const { priceId, packSize, mode, customerEmail, success_url, cancel_url, people_key } = req.body || {};
 
     // Build ONLY setup-safe params
     const params = {
@@ -34,13 +34,14 @@ module.exports = async (req, res) => {
       cancel_url:  cancel_url  || 'https://wipeuranus.com/#cancel',
       custom_text: {
         submit: {
-          message: `Saving a card for Uranus – ${packSize} rolls (${mode}${mode==='subscription' ? `, ${req.body.peopleKey||deliveryKeyHere}` : ''}).`
+          message: `Saving a card for Uranus – ${packSize || ''} rolls (${mode || 'setup'}${mode === 'subscription' && peopleKey ? `, ${peopleKey}` : ''}).`
         }
       },
       metadata: {
         priceId: String(priceId || ''),
         packSize: String(packSize || ''),
         plan: String(mode || ''),
+        peopleKey: String(peopleKey || ''),
       },
     };
 
