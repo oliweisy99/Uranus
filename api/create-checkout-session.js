@@ -98,6 +98,8 @@ module.exports = async (req, res) => {
     //   metadata,
     //   setup_intent_data: { metadata }, 
     // };
+    
+    console.log('Success URL to Stripe:', base.success_url);
 
     const session = await stripe.checkout.sessions.create(params);
 
