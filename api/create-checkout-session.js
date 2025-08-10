@@ -24,7 +24,14 @@ module.exports = async (req, res) => {
 
   try {
     const { priceId, packSize, mode, customerEmail, success_url, cancel_url, peopleKey } = req.body || {};
-
+    
+    if (!['payment', 'subscription'].includes(mode)) {
+      return res.status(400).json({ error: 'Invalid mode (expected "payment" or "subscription")' });
+    }
+    if (!priceId) {
+      return res.status(400).json({ error: 'Missing priceId' });
+    }
+    
     const metadata = {
       priceId: String(priceId || ''),
       packSize: String(packSize || ''),
@@ -33,7 +40,6 @@ module.exports = async (req, res) => {
     };
 
     const base = {
-      customer_creation: 'always',
       customer_email: customerEmail || undefined,
       success_url: success_url || 'https://wipeuranus.com/#success?session_id={CHECKOUT_SESSION_ID}',
       cancel_url:  cancel_url  || 'https://wipeuranus.com/#cancel',
@@ -41,19 +47,30 @@ module.exports = async (req, res) => {
       custom_text: { submit: { message: `Uranus – ${packSize || ''} rolls (${mode}${peopleKey ? `, ${peopleKey}` : ''})` } },
     };
 
-    const params = mode === 'payment'
-      ? {
-          ...base,
-          mode: 'payment',
-          line_items: [{ price: priceId, quantity: 1 }],
-          payment_intent_data: { setup_future_usage: 'off_session', metadata },
-        }
-      : {
-          ...base,
-          mode: 'subscription',
-          line_items: [{ price: priceId, quantity: 1 }],
-          subscription_data: { metadata },
-        };
+    let params;
+    if (mode === 'payment') {
+      params = {
+        ...base,
+        mode: 'payment',
+        customer_creation: 'always', // ensure a Customer exists so PM is saved
+        line_items: [{ price: priceId, quantity: 1 }],
+        payment_intent_data: { setup_future_usage: 'off_session', metadata },
+      };
+    } else {
+      // subscription
+      params = {
+        ...base,
+        mode: 'subscription',
+        line_items: [{ price: priceId, quantity: 1 }],
+        subscription_data: { metadata },
+      };
+    }
+
+    console.log('Creating Checkout Session with params:', {
+      ...params,
+      // avoid logging full PII
+      customer_email: params.customer_email ? '[present]' : undefined
+    });
     
     // Build ONLY setup-safe params
     // const params = {
