@@ -30,23 +30,46 @@ module.exports = async (req, res) => {
       plan: String(mode || ''),
       peopleKey: String(peopleKey || ''),
     };
-    
-    // Build ONLY setup-safe params
-    const params = {
-      mode: 'setup',
-      payment_method_types: ['card'],  
+
+    const base = {
       customer_creation: 'always',
       customer_email: customerEmail || undefined,
       success_url: success_url || 'https://wipeuranus.com/#success?session_id={CHECKOUT_SESSION_ID}',
       cancel_url:  cancel_url  || 'https://wipeuranus.com/#cancel',
-      custom_text: {
-        submit: {
-          message: `Saving a card for Uranus – ${packSize || ''} rolls (${mode || 'setup'}${mode === 'subscription' && peopleKey ? `, ${peopleKey}` : ''}).`
-        }
-      },
       metadata,
-      setup_intent_data: { metadata }, 
+      custom_text: { submit: { message: `Uranus – ${packSize || ''} rolls (${mode}${peopleKey ? `, ${peopleKey}` : ''})` } },
     };
+
+    const params = mode === 'payment'
+      ? {
+          ...base,
+          mode: 'payment',
+          line_items: [{ price: priceId, quantity: 1 }],
+          payment_intent_data: { setup_future_usage: 'off_session', metadata },
+        }
+      : {
+          ...base,
+          mode: 'subscription',
+          line_items: [{ price: priceId, quantity: 1 }],
+          subscription_data: { metadata },
+        };
+    
+    // Build ONLY setup-safe params
+    // const params = {
+    //   mode: 'setup',
+    //   payment_method_types: ['card'],  
+    //   customer_creation: 'always',
+    //   customer_email: customerEmail || undefined,
+    //   success_url: success_url || 'https://wipeuranus.com/#success?session_id={CHECKOUT_SESSION_ID}',
+    //   cancel_url:  cancel_url  || 'https://wipeuranus.com/#cancel',
+    //   custom_text: {
+    //     submit: {
+    //       message: `Saving a card for Uranus – ${packSize || ''} rolls (${mode || 'setup'}${mode === 'subscription' && peopleKey ? `, ${peopleKey}` : ''}).`
+    //     }
+    //   },
+    //   metadata,
+    //   setup_intent_data: { metadata }, 
+    // };
 
     console.log('Creating setup Checkout Session with params:', params); // helpful sanity log
 
