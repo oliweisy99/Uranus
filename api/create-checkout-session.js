@@ -23,35 +23,49 @@ module.exports = async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
-    const { priceId, packSize, mode, customerEmail, success_url, cancel_url, peopleKey } = req.body || {};
-    
+    const {
+      priceId,
+      packSize,
+      mode,                 // 'payment' | 'subscription'
+      customerEmail,
+      success_url,
+      cancel_url,
+      peopleKey,
+      shipDelay,            // '1w' | '2w' | '1m' | '2m' | ''
+      delayDays             // number of days (0, 7, 14, 30, 60)
+    } = req.body || {};
+
     if (!['payment', 'subscription'].includes(mode)) {
       return res.status(400).json({ error: 'Invalid mode (expected "payment" or "subscription")' });
     }
     if (!priceId) {
       return res.status(400).json({ error: 'Missing priceId' });
     }
-    
+
+    const safeDelayDays = Number.isFinite(delayDays) ? Math.max(0, Math.floor(delayDays)) : 0;
+    const now = Math.floor(Date.now() / 1000);
+    const delaySeconds = safeDelayDays * 24 * 60 * 60;
+
     const metadata = {
       priceId: String(priceId || ''),
       packSize: String(packSize || ''),
       plan: String(mode || ''),
       peopleKey: String(peopleKey || ''),
+      shipDelay: String(shipDelay || ''),
+      delayDays: String(safeDelayDays)
     };
 
-// pick the same domain the request came from (handles www vs non-www)
+    // pick the same domain the request came from (handles www vs non-www)
     const siteOrigin = (ALLOWED_ORIGINS.has(origin) ? origin : 'https://wipeuranus.com').replace(/\/$/, '');
-    
+
     const DEFAULT_SUCCESS = `${siteOrigin}/?session_id={CHECKOUT_SESSION_ID}#success`;
     const DEFAULT_CANCEL  = `${siteOrigin}/#cancel`;
-    
+
     // force a success url that contains the token, even if client sends one
-    const successUrl = (success_url && success_url.includes('{CHECKOUT_SESSION_ID}'))
-      ? success_url
-      : DEFAULT_SUCCESS;
-    
-    const cancelUrl = cancel_url || DEFAULT_CANCEL;
-    
+    const successUrl = (success_url && success_url.includes('{CHECKOUT_SESSION_ID}')) ? success_url : DEFAULT_SUCCESS;
+    const cancelUrl  = cancel_url || DEFAULT_CANCEL;
+
+    // Base shared options
     const base = {
       customer_email: customerEmail || undefined,
       success_url: successUrl,
@@ -60,47 +74,54 @@ module.exports = async (req, res) => {
       shipping_address_collection: { allowed_countries: ['GB'] },
       billing_address_collection: 'required',
       metadata,
-      custom_text: { submit: { message: `Uranus – ${packSize || ''} rolls (${mode}${peopleKey ? `, ${peopleKey}` : ''})` } },
+      custom_text: {
+        submit: {
+          message: `Uranus – ${packSize || ''} rolls (${mode}${peopleKey ? `, ${peopleKey}` : ''}${shipDelay ? `, ships in ${shipDelay}` : ''})`
+        }
+      }
     };
 
     let params;
-    if (mode === 'payment') {
-      params = {
-        ...base,
-        mode: 'payment',
-        customer_creation: 'always', // ensure a Customer exists so PM is saved
-        line_items: [{ price: priceId, quantity: 1 }],
-        payment_intent_data: { setup_future_usage: 'off_session', metadata },
-      };
-    } else {
-      // subscription
+
+    // ---- CASE A: SUBSCRIPTION ----
+    if (mode === 'subscription') {
+      const subscription_data = { metadata };
+
+      // If user chose a delay, convert it into a trial (Stripe bills at trial end)
+      if (safeDelayDays > 0) {
+        // Stripe requires trial_end to be >= 48h in the future; enforce that minimum
+        const minTwoDays = 2 * 24 * 60 * 60;
+        const trialEnd = now + Math.max(delaySeconds, minTwoDays);
+        subscription_data.trial_end = trialEnd;
+
+        // Optional: avoid proration on future changes, harmless for new subs
+        subscription_data.proration_behavior = 'none';
+      }
+
       params = {
         ...base,
         mode: 'subscription',
         line_items: [{ price: priceId, quantity: 1 }],
-        subscription_data: { metadata },
+        subscription_data
       };
     }
-    
-    // Build ONLY setup-safe params
-    // const params = {
-    //   mode: 'setup',
-    //   payment_method_types: ['card'],  
-    //   customer_creation: 'always',
-    //   customer_email: customerEmail || undefined,
-    //   success_url: success_url || 'https://wipeuranus.com/#success?session_id={CHECKOUT_SESSION_ID}',
-    //   cancel_url:  cancel_url  || 'https://wipeuranus.com/#cancel',
-    //   custom_text: {
-    //     submit: {
-    //       message: `Saving a card for Uranus – ${packSize || ''} rolls (${mode || 'setup'}${mode === 'subscription' && peopleKey ? `, ${peopleKey}` : ''}).`
-    //     }
-    //   },
-    //   metadata,
-    //   setup_intent_data: { metadata }, 
-    // };
-    
-    console.log('Success URL to Stripe:', base.success_url);
 
+    // ---- CASE B: ONE-TIME PAYMENT ----
+    if (mode === 'payment') {
+      params = {
+        ...base,
+        mode: 'payment',
+        customer_creation: 'always', // ensures a Customer so PM can be saved
+        line_items: [{ price: priceId, quantity: 1 }],
+        payment_intent_data: {
+          setup_future_usage: 'off_session',
+          metadata
+          // NOTE: You could set capture_method: 'manual' here, but auth would expire in ~7 days.
+        }
+      };
+    }
+
+    console.log('Success URL to Stripe:', base.success_url);
     const session = await stripe.checkout.sessions.create(params);
 
     res.setHeader('Content-Type', 'application/json');
