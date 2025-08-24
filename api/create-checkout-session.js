@@ -94,8 +94,6 @@ module.exports = async (req, res) => {
         const trialEnd = now + Math.max(delaySeconds, minTwoDays);
         subscription_data.trial_end = trialEnd;
 
-        // Optional: avoid proration on future changes, harmless for new subs
-        subscription_data.proration_behavior = 'none';
       }
 
       params = {
