@@ -34,12 +34,8 @@ module.exports = async (req, res) => {
     } : undefined;
 
     const siteOrigin = (ALLOWED_ORIGINS.has(origin) ? origin : 'https://wipeuranus.com').replace(/\/$/, '');
-
-    const DEFAULT_SUCCESS = `${siteOrigin}/?session_id={CHECKOUT_SESSION_ID}#success`;
-    const DEFAULT_CANCEL  = `${siteOrigin}/#cancel`;
-        // force a success url that contains the token, even if client sends one
-    const successUrl = (success_url && success_url.includes('{CHECKOUT_SESSION_ID}')) ? success_url : DEFAULT_SUCCESS;
-    const cancelUrl  = cancel_url || DEFAULT_CANCEL;
+    const successUrl = `${siteOrigin}/#success?session_id={CHECKOUT_SESSION_ID}`;
+    const cancelUrl  = `${siteOrigin}/#cancel`;
 
     // 1) Ensure a Customer with your order details stored
     const { data } = await stripe.customers.list({ email, limit: 1 });
