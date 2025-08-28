@@ -20,7 +20,7 @@ module.exports = async (req, res) => {
   res.setHeader('Access-Control-Max-Age', '86400');
 
   if (req.method === 'OPTIONS') return res.status(204).end();
-  if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
+  if (req.method !== 'GET')     return res.status(405).json({ error: 'Method not allowed' });
 
   const id = req.query.id || req.query.session_id;
   if (!id) return res.status(400).json({ error: 'Missing session id' });
@@ -29,33 +29,43 @@ module.exports = async (req, res) => {
     console.log(`[GETSESSION][${_rid}] Retrieving session id=${id}`);
 
     const session = await stripe.checkout.sessions.retrieve(id, {
-      expand: ['customer', 'setup_intent.payment_method']
+      expand: ['customer'] // (we no longer rely on setup_intent.payment_method here)
     });
 
     // Customer can be id string or expanded object
-    const custRaw = session.customer || null;
+    const custRaw     = session.customer || null;
     const customer_id = typeof custRaw === 'string' ? custRaw : (custRaw?.id || null);
-    const custObj = typeof custRaw === 'object' && custRaw ? custRaw : {};
+    const custObj     = (typeof custRaw === 'object' && custRaw) ? custRaw : {};
+    const cd          = session.customer_details || {};
 
-    const cd = session.customer_details || {};
+    // Prefer customer metadata; fall back to session metadata
+    const mdC = custObj.metadata || {};
+    const mdS = session.metadata || {};
+    const selectedPack    = mdC.selectedPack || mdC.packSize || mdS.selectedPack || mdS.packSize || null;
+    const peopleKey       = mdC.peopleKey    || mdS.peopleKey    || null;
+    const shipDelay       = mdC.shipDelay    || mdS.shipDelay    || null;
+    const planMode        = mdS.mode || null;
+    const preorder_status = mdC.preorder_status || null;
 
-    // Prefer customer metadata; fall back to session metadata; map packSize -> selectedPack
-    const mdC = (custObj.metadata || {});
-    const mdS = (session.metadata || {});
-    const selectedPack = mdC.selectedPack || mdC.packSize || mdS.selectedPack || mdS.packSize || null;
-    const peopleKey    = mdC.peopleKey    || mdS.peopleKey    || null;
-    const shipDelay    = mdC.shipDelay    || mdS.shipDelay    || null;
-    const planMode     = mdS.mode || null; // your original plan mode lives on the session
-
-    // Saved card (include id)
-    const pm = session.setup_intent?.payment_method;
-    const saved_card = (pm && pm.type === 'card') ? {
-      id: pm.id,
-      brand: pm.card.brand,
-      last4: pm.card.last4,
-      exp_month: pm.card.exp_month,
-      exp_year: pm.card.exp_year
-    } : null;
+    // Read the *currently attached* card (if any)
+    let saved_card = null;
+    if (customer_id) {
+      const cards = await stripe.paymentMethods.list({
+        customer: customer_id,
+        type: 'card',
+        limit: 1
+      });
+      if (cards.data[0]) {
+        const c = cards.data[0].card;
+        saved_card = {
+          id: cards.data[0].id,
+          brand: c.brand,
+          last4: c.last4,
+          exp_month: c.exp_month,
+          exp_year: c.exp_year
+        };
+      }
+    }
 
     const shipping = cd.address
       ? { name: cd.name, phone: cd.phone, address: cd.address }
@@ -67,9 +77,9 @@ module.exports = async (req, res) => {
 
     res.status(200).json({
       id: session.id,
-      mode: session.mode,                 // 'setup'
+      mode: session.mode,           // 'setup'
       status: session.status,
-      customer_id,                        // used by your action forms
+      customer_id,
       email: cd.email || custObj.email || null,
       customer_name: cd.name || custObj.name || null,
       shipping,
@@ -82,8 +92,9 @@ module.exports = async (req, res) => {
       peopleKey,
       shipDelay,
       planMode,
+      preorder_status,              // <-- expose status
 
-      saved_card
+      saved_card                    // <-- reflects *current* attachment state
     });
   } catch (e) {
     console.error(`[GETSESSION][${_rid}] ERROR ${e.message}`);
