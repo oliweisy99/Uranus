@@ -33,8 +33,8 @@ module.exports = async (req, res) => {
       // region/state optional: shipping.address.state && { state: shipping.address.state }
     } : undefined;
 
-    const siteOrigin = (ALLOWED_ORIGINS.has(origin) ? origin : 'https://wipeuranus.com').replace(/\/$/, '');
-    const successUrl = `${siteOrigin}/?session_id={CHECKOUT_SESSION_ID}#success`;
+    const siteOrigin = 'https://wipeuranus.com'; // pin to your canonical domain
+    const successUrl = `${siteOrigin}/#success?session_id={CHECKOUT_SESSION_ID}`;
     const cancelUrl  = `${siteOrigin}/#cancel`;
 
     // 1) Ensure a Customer with your order details stored
