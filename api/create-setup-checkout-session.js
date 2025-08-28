@@ -10,6 +10,9 @@ const ALLOWED_ORIGINS = new Set([
 
 module.exports = async (req, res) => {
   const origin = req.headers.origin;
+
+  console.log(`[SETUP][${_rid}] START method=${req.method} origin=${origin} ua=${req.headers['user-agent'] || ''}`);
+
   if (ALLOWED_ORIGINS.has(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
   }
@@ -93,9 +96,15 @@ module.exports = async (req, res) => {
         order_summary: orderSummary || 'We’ll charge this card when your order ships.'
       }
     });
-
+    
+    console.log(`[SETUP][${_rid}] Session created id=${session.id} url_present=${!!session.url}`);
     res.status(200).json({ url: session.url });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    console.error(`[SETUP][${_rid}] ERROR ${e.type || ''} ${e.message}`);
+    if (e.raw && e.raw.param) console.error(`[SETUP][${_rid}] Stripe param error -> ${e.raw.param}`);
+    console.error(`[SETUP][${_rid}] STACK\n${e.stack}`);
+    return res.status(500).json({ error: e.message, rid: _rid });
+  } finally {
+    console.log(`[SETUP][${_rid}] END`);
   }
 };
