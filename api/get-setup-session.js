@@ -23,10 +23,13 @@ module.exports = async (req, res) => {
   if (!id) return res.status(400).json({ error: 'Missing session id' });
 
   try {
+    console.log(`[GETSESSION][${_rid}] Retrieving session id=${id}`);
+
     // Expand to fetch customer + saved payment method details
     const session = await stripe.checkout.sessions.retrieve(id, {
       expand: ['customer', 'setup_intent.payment_method']
     });
+    console.log(`[GETSESSION][${_rid}] status=${session.status} mode=${session.mode} customer=${session.customer?.id || session.customer || 'n/a'}`);
 
     // Prefer customer_details from the session; fall back to customer object
     const cd = session.customer_details || {};
@@ -65,6 +68,10 @@ module.exports = async (req, res) => {
       saved_card: card
     });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    console.error(`[GETSESSION][${_rid}] ERROR ${e.message}`);
+    console.error(`[GETSESSION][${_rid}] STACK\n${e.stack}`);
+    return res.status(500).json({ error: e.message });
+  } finally {
+    console.log(`[GETSESSION][${_rid}] END`);
   }
 };
