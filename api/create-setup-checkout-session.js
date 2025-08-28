@@ -23,26 +23,44 @@ module.exports = async (req, res) => {
 
   try {
     const { email, name, shipping, orderSummary, metadata } = req.body;
-
+    // Build a "billing address = shipping address" object for the Customer
+    const billingAddress = shipping?.address ? {
+      line1: shipping.address.line1,
+      line2: shipping.address.line2 || null,
+      city: shipping.address.city,
+      postal_code: shipping.address.postal_code,
+      country: shipping.address.country,
+      // region/state optional: shipping.address.state && { state: shipping.address.state }
+    } : undefined;
+    
     // 1) Ensure a Customer with your order details stored
     const { data } = await stripe.customers.list({ email, limit: 1 });
-    const customer = data[0] || await stripe.customers.create({ email, name, shipping, metadata });
+    const customer = data[0] || await stripe.customers.create({
+      email,
+      name,
+      address: billingAddress,    // <-- billing prefill
+      shipping,                   // <-- keep shipping on customer too
+      metadata
+    });
 
     // keep details fresh
-    await stripe.customers.update(customer.id, { name, shipping });
+    await stripe.customers.update(customer.id, {
+      name,
+      address: billingAddress,    // <-- keep in sync
+      shipping
+    });
 
     // 2) Create Checkout Session in SETUP mode
     const session = await stripe.checkout.sessions.create({
       mode: 'setup',
       customer: customer.id,
       currency: 'gbp', 
-      // Optionally ask Checkout to collect billing address during card entry:
       billing_address_collection: 'required',
       // You can let Stripe send customer comms and show your copy:
       custom_text: {
         submit: { message: (orderSummary || 'We’ll charge this card when your order ships.') }
       },
-      success_url: 'https://wipeuranus.com/#card-saved',
+      success_url: 'https://wipeuranus.com/#success',
       cancel_url:  'https://wipeuranus.com/#cancel',
       metadata: {
         ...metadata,
