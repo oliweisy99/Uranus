@@ -32,7 +32,15 @@ module.exports = async (req, res) => {
       country: shipping.address.country,
       // region/state optional: shipping.address.state && { state: shipping.address.state }
     } : undefined;
-    
+
+    const siteOrigin = (ALLOWED_ORIGINS.has(origin) ? origin : 'https://wipeuranus.com').replace(/\/$/, '');
+
+    const DEFAULT_SUCCESS = `${siteOrigin}/?session_id={CHECKOUT_SESSION_ID}#success`;
+    const DEFAULT_CANCEL  = `${siteOrigin}/#cancel`;
+        // force a success url that contains the token, even if client sends one
+    const successUrl = (success_url && success_url.includes('{CHECKOUT_SESSION_ID}')) ? success_url : DEFAULT_SUCCESS;
+    const cancelUrl  = cancel_url || DEFAULT_CANCEL;
+
     // 1) Ensure a Customer with your order details stored
     const { data } = await stripe.customers.list({ email, limit: 1 });
     const customer = data[0] || await stripe.customers.create({
@@ -62,8 +70,8 @@ module.exports = async (req, res) => {
       custom_text: {
         submit: { message: (orderSummary || 'We’ll charge this card when your order ships.') }
       },
-      success_url: 'https://wipeuranus.com/#success',
-      cancel_url:  'https://wipeuranus.com/#cancel',
+      success_url: successUrl,
+      cancel_url:  cancelUrl,
       metadata: {
         ...metadata,
         // helpful for reconciling the saved payment method with your order
