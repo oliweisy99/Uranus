@@ -32,25 +32,22 @@ module.exports = async (req, res) => {
       expand: ['customer', 'setup_intent.payment_method']
     });
 
-    // Customer object or string
+    // Customer can be id string or expanded object
     const custRaw = session.customer || null;
     const customer_id = typeof custRaw === 'string' ? custRaw : (custRaw?.id || null);
+    const custObj = typeof custRaw === 'object' && custRaw ? custRaw : {};
 
-    // Prefer customer_details from the session
     const cd = session.customer_details || {};
-    const custObj = (typeof custRaw === 'object' && custRaw) ? custRaw : {};
 
-    const shipping = cd.address
-      ? { name: cd.name, phone: cd.phone, address: cd.address }
-      : (custObj.shipping || null);
+    // Prefer customer metadata; fall back to session metadata; map packSize -> selectedPack
+    const mdC = (custObj.metadata || {});
+    const mdS = (session.metadata || {});
+    const selectedPack = mdC.selectedPack || mdC.packSize || mdS.selectedPack || mdS.packSize || null;
+    const peopleKey    = mdC.peopleKey    || mdS.peopleKey    || null;
+    const shipDelay    = mdC.shipDelay    || mdS.shipDelay    || null;
+    const planMode     = mdS.mode || null; // your original plan mode lives on the session
 
-    const billing = cd.address
-      ? { name: cd.name, address: cd.address }
-      : (custObj.address || null);
-
-    const md = session.metadata || {};
-
-    // Saved payment method (include id!)
+    // Saved card (include id)
     const pm = session.setup_intent?.payment_method;
     const saved_card = (pm && pm.type === 'card') ? {
       id: pm.id,
@@ -60,23 +57,33 @@ module.exports = async (req, res) => {
       exp_year: pm.card.exp_year
     } : null;
 
+    const shipping = cd.address
+      ? { name: cd.name, phone: cd.phone, address: cd.address }
+      : (custObj.shipping || null);
+
+    const billing = cd.address
+      ? { name: cd.name, address: cd.address }
+      : (custObj.address || null);
+
     res.status(200).json({
       id: session.id,
-      mode: session.mode,                  // 'setup'
+      mode: session.mode,                 // 'setup'
       status: session.status,
+      customer_id,                        // used by your action forms
       email: cd.email || custObj.email || null,
       customer_name: cd.name || custObj.name || null,
-      customer_id,                         // <-- add this
       shipping,
       billing,
       currency: session.currency || 'gbp',
-      order_summary: md.order_summary || null,
-      selectedPack: md.selectedPack || null,
-      planMode: md.mode || null,
-      peopleKey: md.peopleKey || null,
-      shipDelay: md.shipDelay || null,
-      priceId: md.priceId || null,
-      saved_card                            // includes id/brand/last4/exp
+      order_summary: mdS.order_summary || null,
+
+      // now sourced from Customer.metadata (fallback to session)
+      selectedPack,
+      peopleKey,
+      shipDelay,
+      planMode,
+
+      saved_card
     });
   } catch (e) {
     console.error(`[GETSESSION][${_rid}] ERROR ${e.message}`);
