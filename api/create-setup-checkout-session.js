@@ -34,7 +34,7 @@ module.exports = async (req, res) => {
     } : undefined;
 
     const siteOrigin = (ALLOWED_ORIGINS.has(origin) ? origin : 'https://wipeuranus.com').replace(/\/$/, '');
-    const successUrl = `${siteOrigin}/#success?session_id={CHECKOUT_SESSION_ID}`;
+    const successUrl = `${siteOrigin}/?session_id={CHECKOUT_SESSION_ID}#success`;
     const cancelUrl  = `${siteOrigin}/#cancel`;
 
     // 1) Ensure a Customer with your order details stored
