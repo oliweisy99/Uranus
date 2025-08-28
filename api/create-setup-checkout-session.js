@@ -63,12 +63,31 @@ module.exports = async (req, res) => {
       mode: 'setup',
       customer: customer.id,
       currency: 'gbp', 
+      consent_collection: {
+      payment_method_reuse_agreement: { position: 'hidden' }
+      },
       shipping_address_collection: { allowed_countries: ['GB'] },
       billing_address_collection: 'required',
       customer_update: { address: 'never', shipping: 'never', name: 'never' }, // optional
       // You can let Stripe send customer comms and show your copy:
       custom_text: {
-        submit: { message: (orderSummary || 'We’ll charge this card when your order ships.') }
+        // Above the button (you have this already)
+        submit: {
+          message: orderSummary || 'We’ll charge this card when your order ships.'
+        },
+        // Below the button — great for your own reuse-agreement copy / portal link
+        after_submit: {
+          message:
+            'You’re saving a card for future charges per our ' +
+            '[Terms](https://wipeuranus.com/terms) and ' +
+            '[Privacy](https://wipeuranus.com/privacy). ' +
+            'You can update or remove this card anytime in your ' +
+            '[account portal](https://wipeuranus.com/#account).'
+        },
+        // If you enable ToS consent checkbox:
+        // terms_of_service_acceptance: {
+        //   message: 'I agree to the [Terms](https://wipeuranus.com/terms).'
+        // }
       },
       success_url: successUrl,
       cancel_url:  cancelUrl,
