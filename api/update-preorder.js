@@ -15,28 +15,42 @@ module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   res.setHeader('Access-Control-Max-Age', '86400');
+
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
-    const { customer_id, packSize, peopleKey, shipDelay, priceId, notes } = req.body || {};
+    // Be tolerant if some platforms send a string body
+    const body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
+    const { customer_id, packSize, peopleKey, shipDelay, priceId, notes } = body;
+
     if (!customer_id) return res.status(400).json({ error: 'Missing customer_id' });
 
-    // Use the keys the UI reads; keep packSize too for backward compat.
-    const metadata = {
+    // Write to Customer.metadata (keys your UI reads)
+    const meta = {
       preorder_status: 'active',
-      selectedPack: String(packSize || ''), // <-- UI expects selectedPack
-      packSize:      String(packSize || ''), // (compat)
+      selectedPack: String(packSize || ''), // UI expects selectedPack; we also keep packSize for compat
+      packSize:      String(packSize || ''),
       peopleKey:     String(peopleKey || ''),
       shipDelay:     String(shipDelay || ''),
       priceId:       String(priceId || ''),
       order_notes:   String(notes || '')
     };
 
-    await stripe.customers.update(customer_id, { metadata });
-    return res.status(200).json({ ok: true });
+    await stripe.customers.update(customer_id, { metadata: meta });
+
+    // Optional: read back for confidence
+    const c = await stripe.customers.retrieve(customer_id);
+    res.status(200).json({
+      ok: true,
+      saved: {
+        selectedPack: c.metadata.selectedPack || c.metadata.packSize || null,
+        peopleKey: c.metadata.peopleKey || null,
+        shipDelay: c.metadata.shipDelay || null
+      }
+    });
   } catch (e) {
-    console.error('[update-preorder] ERROR', e);
-    return res.status(500).json({ error: e.message || 'Failed to update preorder' });
+    console.error('[update-preorder] error:', e);
+    res.status(500).json({ error: e.message || 'Server error' });
   }
 };
