@@ -9,6 +9,7 @@ const ALLOWED_ORIGINS = new Set([
 ]);
 
 module.exports = async (req, res) => {
+  const _rid = rid();
   const origin = req.headers.origin;
 
   console.log(`[SETUP][${_rid}] START method=${req.method} origin=${origin} ua=${req.headers['user-agent'] || ''}`);
