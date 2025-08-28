@@ -30,7 +30,8 @@ module.exports = async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
-    const { email, name, shipping, orderSummary, metadata } = req.body;
+    const { email, name, shipping, orderSummary, success_url, cancel_url, metadata } = req.body || {};
+    
     // Build a "billing address = shipping address" object for the Customer
     const billingAddress = shipping?.address ? {
       line1: shipping.address.line1,
@@ -41,9 +42,14 @@ module.exports = async (req, res) => {
       // region/state optional: shipping.address.state && { state: shipping.address.state }
     } : undefined;
 
-    const siteOrigin = 'https://wipeuranus.com'; // pin to your canonical domain
-    const successUrl = `${siteOrigin}/#success?session_id={CHECKOUT_SESSION_ID}`;
-    const cancelUrl  = `${siteOrigin}/#cancel`;
+    const siteOrigin = (ALLOWED_ORIGINS.has(origin) ? origin : 'https://wipeuranus.com').replace(/\/$/, '');
+
+    const DEFAULT_SUCCESS = `${siteOrigin}/?session_id={CHECKOUT_SESSION_ID}#success`;
+    const DEFAULT_CANCEL  = `${siteOrigin}/#cancel`;
+
+    // force a success url that contains the token, even if client sends one
+    const successUrl = (success_url && success_url.includes('{CHECKOUT_SESSION_ID}')) ? success_url : DEFAULT_SUCCESS;
+    const cancelUrl  = cancel_url || DEFAULT_CANCEL;
 
     // 1) Ensure a Customer with your order details stored
     const { data } = await stripe.customers.list({ email, limit: 1 });
