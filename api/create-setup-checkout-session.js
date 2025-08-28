@@ -65,7 +65,7 @@ module.exports = async (req, res) => {
       metadata: {
         ...metadata,
         // helpful for reconciling the saved payment method with your order
-        order_summary: orderSummary || ''
+        order_summary: orderSummary || 'We’ll charge this card when your order ships.'
       }
     });
 
