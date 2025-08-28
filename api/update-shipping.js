@@ -1,8 +1,14 @@
 const Stripe = require('stripe');
-const { applyCors } = require('.cors');
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-06-20' });
+const ALLOWED = new Set(['https://wipeuranus.com','https://www.wipeuranus.com','https://uranus-azure.vercel.app']);
 
-module.exports = async (req, res) => {
+module.exports = async (req,res)=>{
+  const origin=req.headers.origin; if (ALLOWED.has(origin)) res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Vary','Origin'); res.setHeader('Access-Control-Allow-Methods','POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers','Content-Type');
+  if (req.method==='OPTIONS') return res.status(204).end();
+  if (req.method!=='POST') return res.status(405).json({ error:'Method not allowed' });
+
   if (applyCors(req, res, ['POST','OPTIONS'])) return;
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
