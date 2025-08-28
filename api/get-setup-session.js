@@ -8,6 +8,10 @@ const ALLOWED_ORIGINS = new Set([
   'https://uranus-azure.vercel.app'
 ]);
 
+function rid() {
+  return Math.random().toString(36).slice(2, 10);
+}
+
 module.exports = async (req, res) => {
   const _rid = rid();
   const origin = req.headers.origin;
