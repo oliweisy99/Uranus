@@ -42,10 +42,11 @@ module.exports = async (req, res) => {
       // region/state optional: shipping.address.state && { state: shipping.address.state }
     } : undefined;
 
-    const siteOrigin = (ALLOWED_ORIGINS.has(origin) ? origin : 'https://wipeuranus.com').replace(/\/$/, '');
-
-    const DEFAULT_SUCCESS = `${siteOrigin}/?session_id={CHECKOUT_SESSION_ID}#success`;
-    const DEFAULT_CANCEL  = `${siteOrigin}/#cancel`;
+    const CANONICAL_ORIGIN = 'https://wipeuranus.com';
+    
+    // ... instead of deriving from req.headers.origin:
+    const DEFAULT_SUCCESS = `${CANONICAL_ORIGIN}/?session_id={CHECKOUT_SESSION_ID}#success`;
+    const DEFAULT_CANCEL  = `${CANONICAL_ORIGIN}/#cancel`;
 
     // force a success url that contains the token, even if client sends one
     const successUrl = (success_url && success_url.includes('{CHECKOUT_SESSION_ID}')) ? success_url : DEFAULT_SUCCESS;
