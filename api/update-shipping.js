@@ -9,8 +9,8 @@ module.exports = async (req,res)=>{
   if (req.method==='OPTIONS') return res.status(204).end();
   if (req.method!=='POST') return res.status(405).json({ error:'Method not allowed' });
 
-  if (applyCors(req, res, ['POST','OPTIONS'])) return;
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (req.method==='OPTIONS') return res.status(204).end();
+  if (req.method!=='POST') return res.status(405).json({ error:'Method not allowed' });
 
   try {
     const { customer_id, shipping } = req.body || {};
