@@ -35,6 +35,7 @@ module.exports = async (req, res) => {
     const session = await stripe.checkout.sessions.create({
       mode: 'setup',
       customer: customer.id,
+      currency: 'gbp', 
       // Optionally ask Checkout to collect billing address during card entry:
       billing_address_collection: 'required',
       // You can let Stripe send customer comms and show your copy:
