@@ -108,7 +108,7 @@ module.exports = async (req, res) => {
         //   message: 'I agree to the [Terms](https://wipeuranus.com/terms).'
         // }
       },
-      success_url: portal.url,
+      success_url: successUrl,
       cancel_url:  cancelUrl,
       metadata: {
         ...metadata,
