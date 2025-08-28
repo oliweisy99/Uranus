@@ -55,7 +55,9 @@ module.exports = async (req, res) => {
       mode: 'setup',
       customer: customer.id,
       currency: 'gbp', 
-      billing_address_collection: 'auto',
+      shipping_address_collection: { allowed_countries: ['GB'] },
+      billing_address_collection: 'required',
+      customer_update: { address: 'never', shipping: 'never', name: 'never' }, // optional
       // You can let Stripe send customer comms and show your copy:
       custom_text: {
         submit: { message: (orderSummary || 'We’ll charge this card when your order ships.') }
