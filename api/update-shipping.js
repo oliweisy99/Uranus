@@ -1,5 +1,5 @@
 const Stripe = require('stripe');
-const { applyCors } = require('./_utils/cors');
+const { applyCors } = require('.cors');
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-06-20' });
 
 module.exports = async (req, res) => {
