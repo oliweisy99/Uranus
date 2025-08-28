@@ -62,6 +62,14 @@ module.exports = async (req, res) => {
       metadata
     });
 
+    const siteOrigin = (ALLOWED_ORIGINS.has(origin) ? origin : 'https://wipeuranus.com').replace(/\/$/, '');
+    
+    // create a short-lived Customer Portal session now
+    const portal = await stripe.billingPortal.sessions.create({
+      customer: customer.id,
+      return_url: `${siteOrigin}/#` // where the portal's "Back" button returns
+    });
+    
     // keep details fresh
     await stripe.customers.update(customer.id, {
       name,
@@ -100,7 +108,7 @@ module.exports = async (req, res) => {
         //   message: 'I agree to the [Terms](https://wipeuranus.com/terms).'
         // }
       },
-      success_url: successUrl,
+      success_url: portal.url,
       cancel_url:  cancelUrl,
       metadata: {
         ...metadata,
