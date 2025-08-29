@@ -47,6 +47,11 @@ module.exports = async (req, res) => {
     const planMode        = mdS.mode || null;
     const preorder_status = mdC.preorder_status || null;
 
+    // If cancelled or the customer was deleted, stop here with 410
+    if (preorder_status === 'cancelled' || custObj.deleted === true) {
+      return res.status(410).json({ cancelled:true, reason: 'preorder_cancelled' });
+    }
+    
     // Read the *currently attached* card (if any)
     let saved_card = null;
     if (customer_id) {
