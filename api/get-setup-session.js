@@ -12,7 +12,7 @@ function rid() { return Math.random().toString(36).slice(2, 10); }
 
 module.exports = async (req, res) => {
   const _rid = rid();
-  const origin = req.headers.origin;
+  const origin = req.headers.origin || '';
   if (ALLOWED_ORIGINS.has(origin)) res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Vary', 'Origin');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
@@ -28,47 +28,51 @@ module.exports = async (req, res) => {
   try {
     console.log(`[GETSESSION][${_rid}] Retrieving session id=${id}`);
 
+    // IMPORTANT: expand setup_intent so we can read its metadata
     const session = await stripe.checkout.sessions.retrieve(id, {
-      expand: ['customer'] // (we no longer rely on setup_intent.payment_method here)
+      expand: ['setup_intent', 'customer']
     });
 
-    // Customer can be id string or expanded object
     const custRaw     = session.customer || null;
     const customer_id = typeof custRaw === 'string' ? custRaw : (custRaw?.id || null);
     const custObj     = (typeof custRaw === 'object' && custRaw) ? custRaw : {};
     const cd          = session.customer_details || {};
 
-    // Prefer customer metadata; fall back to session metadata
+    // Prefer customer metadata for persistent prefs; fall back to session
     const mdC = custObj.metadata || {};
     const mdS = session.metadata || {};
     const selectedPack    = mdC.selectedPack || mdC.packSize || mdS.selectedPack || mdS.packSize || null;
     const peopleKey       = mdC.peopleKey    || mdS.peopleKey    || null;
     const shipDelay       = mdC.shipDelay    || mdS.shipDelay    || null;
-    const planMode        = mdS.mode || null;
+    const planMode        = mdS.mode || 'subscription';
     const preorder_status = mdC.preorder_status || null;
 
-    // If cancelled or the customer was deleted, stop here with 410
+    // If cancelled/deleted, short-circuit
     if (preorder_status === 'cancelled' || custObj.deleted === true) {
       return res.status(410).json({ cancelled:true, reason: 'preorder_cancelled' });
     }
-    
-    // Read the *currently attached* card (if any)
+
+    // Pull intended price (prefer Session metadata; fall back to SetupIntent metadata)
+    const si = (typeof session.setup_intent === 'object' && session.setup_intent) ? session.setup_intent : null;
+    const mdSI = (si && si.metadata) ? si.metadata : {};
+
+    const intended_price_pence = (mdS.intended_price_pence && Number.isFinite(+mdS.intended_price_pence))
+      ? +mdS.intended_price_pence
+      : (mdSI.intended_price_pence && Number.isFinite(+mdSI.intended_price_pence))
+        ? +mdSI.intended_price_pence
+        : undefined;
+
+    const intended_price_display = mdS.intended_price_display || mdSI.intended_price_display || undefined;
+    const intended_price_currency = (mdS.intended_price_currency || mdSI.intended_price_currency || session.currency || 'gbp').toLowerCase();
+    const coupon_code = mdS.coupon || mdSI.coupon || undefined;
+
+    // Current saved card (if any)
     let saved_card = null;
     if (customer_id) {
-      const cards = await stripe.paymentMethods.list({
-        customer: customer_id,
-        type: 'card',
-        limit: 1
-      });
+      const cards = await stripe.paymentMethods.list({ customer: customer_id, type: 'card', limit: 1 });
       if (cards.data[0]) {
         const c = cards.data[0].card;
-        saved_card = {
-          id: cards.data[0].id,
-          brand: c.brand,
-          last4: c.last4,
-          exp_month: c.exp_month,
-          exp_year: c.exp_year
-        };
+        saved_card = { id: cards.data[0].id, brand: c.brand, last4: c.last4, exp_month: c.exp_month, exp_year: c.exp_year };
       }
     }
 
@@ -89,17 +93,22 @@ module.exports = async (req, res) => {
       customer_name: cd.name || custObj.name || null,
       shipping,
       billing,
-      currency: session.currency || 'gbp',
-      order_summary: mdS.order_summary || null,
+      currency: intended_price_currency,
+      order_summary: mdS.order_summary || mdSI.order_summary || null,
 
-      // now sourced from Customer.metadata (fallback to session)
+      // preferences
       selectedPack,
       peopleKey,
       shipDelay,
       planMode,
-      preorder_status,              // <-- expose status
+      preorder_status,
 
-      saved_card                    // <-- reflects *current* attachment state
+      // 💸 intended price (post-coupon)
+      intended_price_pence,
+      intended_price_display,
+      coupon_code,
+
+      saved_card
     });
   } catch (e) {
     console.error(`[GETSESSION][${_rid}] ERROR ${e.message}`);
