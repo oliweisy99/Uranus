@@ -8,9 +8,7 @@ const ALLOWED_ORIGINS = new Set([
   'https://uranus-azure.vercel.app'
 ]);
 
-function rid() {
-  return Math.random().toString(36).slice(2, 10);
-}
+function rid() { return Math.random().toString(36).slice(2, 10); }
 
 function cors(res, origin) {
   if (ALLOWED_ORIGINS.has(origin)) res.setHeader('Access-Control-Allow-Origin', origin);
@@ -51,7 +49,7 @@ module.exports = async (req, res) => {
       cancel_url,
       metadata,
 
-      // NEW — from frontend
+      // from frontend
       intended_price_pence,
       intended_price_currency,
       intended_price_display
@@ -78,13 +76,11 @@ module.exports = async (req, res) => {
 
     const CANONICAL_ORIGIN = 'https://wipeuranus.com';
     const DEFAULT_SUCCESS = `${CANONICAL_ORIGIN}/?session_id={CHECKOUT_SESSION_ID}#success`;
-    const DEFAULT_CANCEL = `${CANONICAL_ORIGIN}/#cancel`;
+    const DEFAULT_CANCEL  = `${CANONICAL_ORIGIN}/#cancel`;
 
     const successUrl =
-      success_url && success_url.includes('{CHECKOUT_SESSION_ID}')
-        ? success_url
-        : DEFAULT_SUCCESS;
-    const cancelUrl = cancel_url || DEFAULT_CANCEL;
+      success_url && success_url.includes('{CHECKOUT_SESSION_ID}') ? success_url : DEFAULT_SUCCESS;
+    const cancelUrl  = cancel_url || DEFAULT_CANCEL;
 
     // Reuse or create Customer
     const { data } = await stripe.customers.list({ email, limit: 1 });
@@ -98,30 +94,50 @@ module.exports = async (req, res) => {
         metadata: safeMeta
       }));
 
-    // (Optional) keep customer fields updated
-    await stripe.customers.update(customer.id, {
-      name,
-      address: billingAddress,
-      shipping
-    });
-
     // Build final metadata object (Session + SetupIntent)
     const meta = {
       ...safeMeta,
       order_summary: orderSummary || 'We’ll charge this card when your order ships.',
+
+      // existing intended price fields
       intended_price_pence: String(pricePence),
       intended_price_currency: priceCurrency,
-      intended_price_display: priceDisplay
+      intended_price_display: priceDisplay,
+
+      // NEW: super explicit manual fields for quick copy/paste
+      manual_charge_amount_pence: String(pricePence),
+      manual_charge_currency: priceCurrency,
+      manual_charge_display: priceDisplay || '',
+      manual_charge_note: 'Paste amount (pence) into a PaymentIntent when charging later.'
     };
+
+    // Keep customer fields updated + surface manual fields on the Customer page too
+    await stripe.customers.update(customer.id, {
+      name,
+      address: billingAddress,
+      shipping,
+      metadata: {
+        ...(customer.metadata || {}),
+        last_intended_price_pence: String(pricePence),
+        last_intended_price_currency: priceCurrency,
+        last_intended_price_display: priceDisplay || '',
+        manual_charge_amount_pence: String(pricePence),
+        manual_charge_currency: priceCurrency,
+        manual_charge_display: priceDisplay || ''
+      }
+    });
 
     // Compose the submit message with amount if present
     const submitMessage =
       orderSummary
         ? `${orderSummary} ${priceDisplay ? `You’ll be charged ${priceDisplay} when it ships.` : ''}`
         : `You’ll be charged ${priceDisplay || 'the shown amount'} when your order ships.`;
-    
-    const label = priceDisplay ? `Intended: ${priceDisplay} (${priceCurrency.toUpperCase()})`: 'Intended: n/a';
-    
+
+    // Visible banner on the Session; Description on the SetupIntent
+    const label = priceDisplay
+      ? `Intended: ${priceDisplay} (${priceCurrency.toUpperCase()})`
+      : 'Intended: n/a';
+
     const session = await stripe.checkout.sessions.create({
       mode: 'setup',
       customer: customer.id,
@@ -140,7 +156,7 @@ module.exports = async (req, res) => {
         payment_method_reuse_agreement: { position: 'hidden' }
       },
 
-      // Show the future-charge copy to users
+      // Display copy
       custom_text: {
         submit: { message: submitMessage },
         after_submit: {
@@ -154,12 +170,12 @@ module.exports = async (req, res) => {
       },
 
       success_url: successUrl,
-      cancel_url: cancelUrl,
+      cancel_url:  cancelUrl,
 
-      // Stamp at the Session level (visible in Dashboard and retrievable on success page)
+      // Session-level metadata (shows in Dashboard; retrievable on success)
       metadata: meta,
-    
-      // And ALSO onto the SetupIntent (so it persists with the saved PM)
+
+      // AND on the SetupIntent so it travels with the saved PM
       setup_intent_data: {
         description: label,
         metadata: meta
