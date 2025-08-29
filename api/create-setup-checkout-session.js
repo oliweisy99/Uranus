@@ -45,6 +45,7 @@ async function kitEnsureCustomField(label){
   return json?.custom_field?.key; // e.g. "order_link"
 }
 
+// Upsert by email (Kit will create or update)
 async function kitCreateOrUpdateSubscriber({ email, first_name, fields }){
   const resp = await fetch(`${KIT_API_BASE}/subscribers`,{
     method:'POST', headers: KIT_HEADERS,
@@ -66,13 +67,13 @@ async function kitGetSubscriberByEmail(email){
   return (json?.subscribers||[])[0] || null;
 }
 
-// >>> NEW: get ID by email (convenience)
+// Convenience: get ID by email
 async function kitGetSubscriberIdByEmail(email){
   const sub = await kitGetSubscriberByEmail(email);
   return sub?.id || null;
 }
 
-// >>> NEW: force-set fields via PUT (reliable for existing contacts)
+// Force-set fields via PUT (reliable for existing contacts)
 async function kitUpdateSubscriber(id, payload){
   const resp = await fetch(`${KIT_API_BASE}/subscribers/${id}`,{
     method:'PUT', headers: KIT_HEADERS, body: JSON.stringify(payload)
@@ -83,6 +84,7 @@ async function kitUpdateSubscriber(id, payload){
   return json?.subscriber;
 }
 
+// Add subscriber to a sequence
 async function kitAddToSequence({ sequenceId, email }){
   if (!sequenceId) return;
   const resp = await fetch(`${KIT_API_BASE}/sequences/${sequenceId}/subscribers`,{
@@ -131,6 +133,8 @@ module.exports = async (req,res)=>{
       email, name, address: billingAddress, shipping, metadata: safeMeta
     }));
 
+    const label = priceDisplay ? `Intended: ${priceDisplay} (${priceCurrency.toUpperCase()})` : 'Intended: n/a';
+
     const meta = {
       ...safeMeta,
       order_summary: orderSummary || 'We’ll charge this card when your order ships.',
@@ -143,6 +147,7 @@ module.exports = async (req,res)=>{
       manual_charge_note: 'Paste amount (pence) into a PaymentIntent when charging later.'
     };
 
+    // Keep customer attrs fresh for manual-charge helpers
     await stripe.customers.update(customer.id, {
       name, address: billingAddress, shipping,
       metadata: {
@@ -160,8 +165,6 @@ module.exports = async (req,res)=>{
       orderSummary
         ? `${orderSummary} ${priceDisplay ? `You’ll be charged ${priceDisplay} when it ships.` : ''}`
         : `You’ll be charged ${priceDisplay || 'the shown amount'} when your order ships.`;
-
-    const label = priceDisplay ? `Intended: ${priceDisplay} (${priceCurrency.toUpperCase()})` : 'Intended: n/a';
 
     // Stripe Setup session
     const session = await stripe.checkout.sessions.create({
@@ -190,30 +193,32 @@ module.exports = async (req,res)=>{
       ? successUrl.replace('{CHECKOUT_SESSION_ID}', session.id)
       : successUrl;
 
-    // ---------- KIT: ensure fields exist, write, then PUT to be sure ----------
-    const FIELDS = ['Order Link','Portal Link','Order Label'];
-    const keys = await Promise.all(FIELDS.map(l => kitEnsureCustomField(l))); // creates if missing
-    console.log(`[SETUP+KIT][${_rid}] Kit field keys`, keys);
+    // ---------- KIT: ensure fields, then write using KEYS ----------
+    const LABELS = ['Order Link','Portal Link','Order Label'];
+    const [ORDER_KEY, PORTAL_KEY, ORDERLABEL_KEY] = await Promise.all(LABELS.map(kitEnsureCustomField));
+    console.log(`[SETUP+KIT][${_rid}] Kit field keys`, [ORDER_KEY, PORTAL_KEY, ORDERLABEL_KEY]);
 
-    const fields = {
-      'Order Link': session.url,
-      'Portal Link': portalUrl,
-      'Order Label': label
+    // IMPORTANT: map by KEY, not label
+    const fieldsByKey = {
+      [ORDER_KEY]: session.url,
+      [PORTAL_KEY]: portalUrl,
+      [ORDERLABEL_KEY]: label
     };
 
+    // Upsert (create-or-update)
     const createdId = await kitCreateOrUpdateSubscriber({
       email,
       first_name: (name || '').split(' ')[0] || '',
-      fields
+      fields: fieldsByKey
     });
 
-    // >>> NEW: force-set fields via PUT (handles existing subscribers)
+    // For existing contacts, force-set via PUT as well
     const subId = createdId || (await kitGetSubscriberIdByEmail(email));
     if (subId) {
-      await kitUpdateSubscriber(subId, { fields });
+      await kitUpdateSubscriber(subId, { fields: fieldsByKey });
     }
 
-    // Verify what Kit has saved (handy log while testing)
+    // Verify (non-fatal if it fails)
     try {
       const sub = await kitGetSubscriberByEmail(email);
       console.log(`[SETUP+KIT][${_rid}] Kit subscriber verify`, {
@@ -225,7 +230,7 @@ module.exports = async (req,res)=>{
       console.warn(`[SETUP+KIT][${_rid}] Kit verify failed: ${e.message}`);
     }
 
-    // Small delay before enrolling in sequence (avoids rare race)
+    // Small delay before sequence enrollment
     await new Promise(r => setTimeout(r, 400));
 
     const SEQUENCE_ID = process.env.KIT_SEQUENCE_ID_ORDERLINK;
