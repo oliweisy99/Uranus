@@ -119,11 +119,14 @@ module.exports = async (req, res) => {
       orderSummary
         ? `${orderSummary} ${priceDisplay ? `You’ll be charged ${priceDisplay} when it ships.` : ''}`
         : `You’ll be charged ${priceDisplay || 'the shown amount'} when your order ships.`;
-
+    
+    const label = priceDisplay ? `Intended: ${priceDisplay} (${priceCurrency.toUpperCase()})`: 'Intended: n/a';
+    
     const session = await stripe.checkout.sessions.create({
       mode: 'setup',
       customer: customer.id,
       currency: 'gbp',
+      client_reference_id: label,
 
       // Collect shipping to help you fulfil later
       shipping_address_collection: { allowed_countries: ['GB'] },
@@ -155,9 +158,12 @@ module.exports = async (req, res) => {
 
       // Stamp at the Session level (visible in Dashboard and retrievable on success page)
       metadata: meta,
-
+    
       // And ALSO onto the SetupIntent (so it persists with the saved PM)
-      setup_intent_data: { metadata: meta }
+      setup_intent_data: {
+        description: label,
+        metadata: meta
+      }
     });
 
     console.log(`[SETUP][${_rid}] Session created id=${session.id} url_present=${!!session.url}`);
