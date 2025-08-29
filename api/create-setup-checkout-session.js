@@ -34,7 +34,7 @@ function sanitizeMetadata(md){
 
 // ---------- KIT helpers ----------
 
-// 1) Ensure a custom field with this label exists. Returns its key (e.g. "order_link")
+// Ensure a custom field with this label exists. Returns its key (e.g. "order_link")
 async function kitEnsureCustomField(label){
   const resp = await fetch(`${KIT_API_BASE}/custom_fields`,{
     method:'POST', headers: KIT_HEADERS, body: JSON.stringify({ label })
@@ -56,14 +56,31 @@ async function kitCreateOrUpdateSubscriber({ email, first_name, fields }){
   return json?.subscriber?.id;
 }
 
-// Fetch the subscriber by email to verify fields
+// Fetch the subscriber by email
 async function kitGetSubscriberByEmail(email){
   const url = `${KIT_API_BASE}/subscribers?email_address=${encodeURIComponent(email)}`;
-  const resp = await fetch(url, { headers: { 'X-Kit-Api-Key': KIT_HEADERS['X-Kit-Api-Key'] }});
+  const resp = await fetch(url, { headers: KIT_HEADERS });
   const txt = await resp.text();
   if (!resp.ok) throw new Error(`Kit get subscriber by email failed: ${txt}`);
   const json = JSON.parse(txt);
   return (json?.subscribers||[])[0] || null;
+}
+
+// >>> NEW: get ID by email (convenience)
+async function kitGetSubscriberIdByEmail(email){
+  const sub = await kitGetSubscriberByEmail(email);
+  return sub?.id || null;
+}
+
+// >>> NEW: force-set fields via PUT (reliable for existing contacts)
+async function kitUpdateSubscriber(id, payload){
+  const resp = await fetch(`${KIT_API_BASE}/subscribers/${id}`,{
+    method:'PUT', headers: KIT_HEADERS, body: JSON.stringify(payload)
+  });
+  const txt = await resp.text();
+  if (!resp.ok) throw new Error(`Kit update subscriber failed: ${txt}`);
+  const json = JSON.parse(txt);
+  return json?.subscriber;
 }
 
 async function kitAddToSequence({ sequenceId, email }){
@@ -173,7 +190,7 @@ module.exports = async (req,res)=>{
       ? successUrl.replace('{CHECKOUT_SESSION_ID}', session.id)
       : successUrl;
 
-    // ---------- KIT: ensure fields exist, then write ----------
+    // ---------- KIT: ensure fields exist, write, then PUT to be sure ----------
     const FIELDS = ['Order Link','Portal Link','Order Label'];
     const keys = await Promise.all(FIELDS.map(l => kitEnsureCustomField(l))); // creates if missing
     console.log(`[SETUP+KIT][${_rid}] Kit field keys`, keys);
@@ -184,26 +201,32 @@ module.exports = async (req,res)=>{
       'Order Label': label
     };
 
-    const subId = await kitCreateOrUpdateSubscriber({
+    const createdId = await kitCreateOrUpdateSubscriber({
       email,
       first_name: (name || '').split(' ')[0] || '',
       fields
     });
 
-    // Read back for verification (use ?email_address=)
+    // >>> NEW: force-set fields via PUT (handles existing subscribers)
+    const subId = createdId || (await kitGetSubscriberIdByEmail(email));
+    if (subId) {
+      await kitUpdateSubscriber(subId, { fields });
+    }
+
+    // Verify what Kit has saved (handy log while testing)
     try {
       const sub = await kitGetSubscriberByEmail(email);
       console.log(`[SETUP+KIT][${_rid}] Kit subscriber verify`, {
         id: sub?.id,
         email: sub?.email_address,
-        fields: sub?.fields
+        fields: sub?.fields || sub?.custom_fields || null
       });
     } catch (e) {
       console.warn(`[SETUP+KIT][${_rid}] Kit verify failed: ${e.message}`);
     }
 
-    // Small delay to avoid edge race before enrolling to sequence
-    await new Promise(r => setTimeout(r, 350));
+    // Small delay before enrolling in sequence (avoids rare race)
+    await new Promise(r => setTimeout(r, 400));
 
     const SEQUENCE_ID = process.env.KIT_SEQUENCE_ID_ORDERLINK;
     if (SEQUENCE_ID && process.env.KIT_API_KEY) {
