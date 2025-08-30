@@ -32,7 +32,7 @@ function sanitizeMetadata(md){
   return out;
 }
 
-// ----- Kit helpers (same as your current file) -----
+// ----- Kit helpers -----
 async function kitEnsureCustomField(label){
   const resp = await fetch(`${KIT_API_BASE}/custom_fields`,{
     method:'POST', headers: KIT_HEADERS, body: JSON.stringify({ label })
@@ -95,27 +95,39 @@ module.exports = async (req,res)=>{
       email, name, shipping, orderSummary, metadata,
       intended_price_pence, intended_price_currency, intended_price_display
     } = req.body || {};
-    if (!email) return res.status(400).json({ error:'Email is required' });
 
+    // NOTE: email is OPTIONAL now (to allow immediate PE mount)
     const safeMeta = sanitizeMetadata(metadata);
     const pricePence = Number.isFinite(+intended_price_pence) ? Math.max(0, Math.floor(+intended_price_pence)) : 0;
     const priceCurrency = (intended_price_currency || 'gbp').toLowerCase();
     const priceDisplay = intended_price_display ? String(intended_price_display) : '';
 
     const billingAddress = shipping?.address ? {
-      line1: shipping.address.line1, line2: shipping.address.line2 || null,
-      city: shipping.address.city, postal_code: shipping.address.postal_code, country: shipping.address.country
+      line1: shipping.address.line1 || null,
+      line2: shipping.address.line2 || null,
+      city: shipping.address.city || null,
+      postal_code: shipping.address.postal_code || null,
+      country: shipping.address.country || 'GB'
     } : undefined;
 
-    // Stripe customer
-    const { data } = await stripe.customers.list({ email, limit: 1 });
-    const customer = data[0] || (await stripe.customers.create({
-      email, name, address: billingAddress, shipping, metadata: safeMeta
-    }));
+    // Stripe customer: find by email if provided, else create anonymous
+    let customer = null;
+    if (email){
+      const { data } = await stripe.customers.list({ email, limit: 1 });
+      customer = data[0] || (await stripe.customers.create({
+        email, name, address: billingAddress, shipping, metadata: safeMeta
+      }));
+    } else {
+      customer = await stripe.customers.create({
+        name: name || null, address: billingAddress, shipping, metadata: safeMeta
+      });
+    }
 
-    // keep useful price info on customer for later manual charges
+    // store intended price info on customer
     await stripe.customers.update(customer.id, {
-      name, address: billingAddress, shipping,
+      name: name || undefined,
+      address: billingAddress,
+      shipping,
       metadata: {
         ...(customer.metadata || {}),
         last_intended_price_pence: String(pricePence),
@@ -132,7 +144,7 @@ module.exports = async (req,res)=>{
       intended_price_display: priceDisplay
     };
 
-    // Create SetupIntent for off-session use
+    // Create SetupIntent
     const setupIntent = await stripe.setupIntents.create({
       customer: customer.id,
       usage: 'off_session',
@@ -140,39 +152,35 @@ module.exports = async (req,res)=>{
       metadata: meta
     });
 
-    // ----- KIT: store links/info (no Checkout URL now) -----
-    const LABELS = ['Portal Link','Order Label']; // skip "Order Link" since no Checkout URL
-    const [PORTAL_KEY, ORDERLABEL_KEY] = await Promise.all(LABELS.map(kitEnsureCustomField));
+    // ---- KIT (only if email present) ----
+    if (email && process.env.KIT_API_KEY){
+      try{
+        const LABELS = ['Portal Link','Order Label'];
+        const [PORTAL_KEY, ORDERLABEL_KEY] = await Promise.all(LABELS.map(kitEnsureCustomField));
+        const label = priceDisplay ? `Intended: ${priceDisplay} (${priceCurrency.toUpperCase()})` : 'Intended: n/a';
+        const fieldsByKey = {
+          [PORTAL_KEY]: 'https://wipeuranus.com/#success',
+          [ORDERLABEL_KEY]: label
+        };
 
-    const label = priceDisplay ? `Intended: ${priceDisplay} (${priceCurrency.toUpperCase()})` : 'Intended: n/a';
-    const fieldsByKey = {
-      [PORTAL_KEY]: 'https://wipeuranus.com/#success', // you can point to account/portal if you have one
-      [ORDERLABEL_KEY]: label
-    };
+        const createdId = await kitCreateOrUpdateSubscriber({
+          email,
+          first_name: (name || '').split(' ')[0] || '',
+          fields: fieldsByKey
+        });
 
-    const createdId = await kitCreateOrUpdateSubscriber({
-      email,
-      first_name: (name || '').split(' ')[0] || '',
-      fields: fieldsByKey
-    });
+        const subId = createdId || (await kitGetSubscriberIdByEmail(email));
+        if (subId){ await kitUpdateSubscriber(subId, { fields: fieldsByKey }); }
 
-    const subId = createdId || (await kitGetSubscriberIdByEmail(email));
-    if (subId){ await kitUpdateSubscriber(subId, { fields: fieldsByKey }); }
-
-    // Optional: enroll sequence
-    try{
-      const sub = await kitGetSubscriberByEmail(email);
-      console.log(`[SETUP-EMBED+KIT][${_rid}] Kit verify`, {
-        id: sub?.id, email: sub?.email_address, fields: sub?.fields || sub?.custom_fields || null
-      });
-    }catch(e){ console.warn(`[SETUP-EMBED+KIT][${_rid}] Kit verify failed: ${e.message}`); }
-
-    await new Promise(r => setTimeout(r, 400));
-    const SEQUENCE_ID = process.env.KIT_SEQUENCE_ID_ORDERLINK;
-    if (SEQUENCE_ID && process.env.KIT_API_KEY){
-      await kitAddToSequence({ sequenceId: SEQUENCE_ID, email });
-    }else{
-      console.warn(`[SETUP-EMBED+KIT][${_rid}] Skipped sequence: missing KIT_SEQUENCE_ID_ORDERLINK or KIT_API_KEY`);
+        const SEQUENCE_ID = process.env.KIT_SEQUENCE_ID_ORDERLINK;
+        if (SEQUENCE_ID){
+          await kitAddToSequence({ sequenceId: SEQUENCE_ID, email });
+        } else {
+          console.warn(`[SETUP-EMBED+KIT][${_rid}] Skipped sequence: missing KIT_SEQUENCE_ID_ORDERLINK`);
+        }
+      }catch(e){
+        console.warn(`[SETUP-EMBED+KIT][${_rid}] KIT step skipped: ${e.message}`);
+      }
     }
 
     console.log(`[SETUP-EMBED+KIT][${_rid}] SetupIntent created id=${setupIntent.id}`);
