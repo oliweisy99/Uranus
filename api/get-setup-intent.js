@@ -1,12 +1,6 @@
-// /api/create-setup-intent-and-kit.js
+// /api/get-setup-intent.js
 const Stripe = require('stripe');
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-06-20' });
-
-const KIT_API_BASE = 'https://api.kit.com/v4';
-const KIT_HEADERS = {
-  'Content-Type': 'application/json',
-  'X-Kit-Api-Key': process.env.KIT_API_KEY || ''
-};
 
 const ALLOWED_ORIGINS = new Set([
   'https://wipeuranus.com',
@@ -14,246 +8,137 @@ const ALLOWED_ORIGINS = new Set([
   'https://uranus-azure.vercel.app'
 ]);
 
-function rid(){ return Math.random().toString(36).slice(2,10); }
 function cors(res, origin){
   if (ALLOWED_ORIGINS.has(origin)) res.setHeader('Access-Control-Allow-Origin', origin);
   res.setHeader('Vary','Origin');
-  res.setHeader('Access-Control-Allow-Methods','POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods','GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers','Content-Type');
   res.setHeader('Access-Control-Max-Age','86400');
 }
-function sanitizeMetadata(md){
-  const out={}; if(!md||typeof md!=='object') return out;
-  for (const [k,v] of Object.entries(md)){
-    if (v==null) continue;
-    if (typeof v==='object') continue;
-    out[String(k)] = String(v).slice(0,500);
-  }
-  return out;
-}
+function rid(){ return Math.random().toString(36).slice(2,10); }
+const pick = v => (typeof v === 'string' && v.trim()) ? v.trim() : undefined;
 
-// ----- Kit helpers -----
-async function kitEnsureCustomField(label){
-  // Idempotently ensure a custom field exists; returns field.key
-  const resp = await fetch(`${KIT_API_BASE}/custom_fields`,{
-    method:'POST', headers: KIT_HEADERS, body: JSON.stringify({ label })
-  });
-  const txt = await resp.text();
-  if (!resp.ok) throw new Error(`Kit ensure custom field "${label}" failed: ${txt}`);
-  const json = JSON.parse(txt);
-  return json?.custom_field?.key;
-}
-async function kitCreateOrUpdateSubscriber({ email, first_name, fields }){
-  const resp = await fetch(`${KIT_API_BASE}/subscribers`,{
-    method:'POST', headers: KIT_HEADERS,
-    body: JSON.stringify({ first_name: first_name||'', email_address: email, fields })
-  });
-  const txt = await resp.text();
-  if (!resp.ok) throw new Error(`Kit create/update subscriber failed: ${txt}`);
-  const json = JSON.parse(txt);
-  return json?.subscriber?.id;
-}
-async function kitGetSubscriberByEmail(email){
-  const url = `${KIT_API_BASE}/subscribers?email_address=${encodeURIComponent(email)}`;
-  const resp = await fetch(url, { headers: KIT_HEADERS });
-  const txt = await resp.text();
-  if (!resp.ok) throw new Error(`Kit get subscriber by email failed: ${txt}`);
-  const json = JSON.parse(txt);
-  return (json?.subscribers||[])[0] || null;
-}
-async function kitGetSubscriberIdByEmail(email){
-  const sub = await kitGetSubscriberByEmail(email);
-  return sub?.id || null;
-}
-async function kitUpdateSubscriber(id, payload){
-  const resp = await fetch(`${KIT_API_BASE}/subscribers/${id}`,{
-    method:'PUT', headers: KIT_HEADERS, body: JSON.stringify(payload)
-  });
-  const txt = await resp.text();
-  if (!resp.ok) throw new Error(`Kit update subscriber failed: ${txt}`);
-  const json = JSON.parse(txt);
-  return json?.subscriber;
-}
-async function kitAddToSequence({ sequenceId, email }){
-  if (!sequenceId) return;
-  const resp = await fetch(`${KIT_API_BASE}/sequences/${sequenceId}/subscribers`,{
-    method:'POST', headers: KIT_HEADERS, body: JSON.stringify({ email_address: email })
-  });
-  if (!resp.ok) throw new Error(`Kit add-to-sequence failed: ${await resp.text()}`);
-}
-
-module.exports = async (req,res)=>{
+module.exports = async (req, res) => {
   const _rid = rid();
   const origin = req.headers.origin || '';
-  console.log(`[SETUP-EMBED+KIT][${_rid}] START method=${req.method} origin=${origin}`);
   cors(res, origin);
 
   if (req.method === 'OPTIONS') return res.status(204).end();
-  if (req.method !== 'POST') return res.status(405).json({ error:'Method not allowed' });
+  if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
+
+  const id = (req.query && req.query.id) ? String(req.query.id) : null;
+  if (!id) return res.status(400).json({ error: 'Missing id (SetupIntent id)' });
 
   try{
-    const {
-      email, name, shipping, orderSummary, metadata,
-      intended_price_pence, intended_price_currency, intended_price_display
-    } = req.body || {};
-
-    const safeMeta = sanitizeMetadata(metadata);
-    const pricePence = Number.isFinite(+intended_price_pence) ? Math.max(0, Math.floor(+intended_price_pence)) : 0;
-    const priceCurrency = (intended_price_currency || 'gbp').toLowerCase();
-    const priceDisplay = intended_price_display ? String(intended_price_display) : '';
-
-    const billingAddress = shipping?.address ? {
-      line1: shipping.address.line1 || null,
-      line2: shipping.address.line2 || null,
-      city: shipping.address.city || null,
-      postal_code: shipping.address.postal_code || null,
-      country: shipping.address.country || 'GB'
-    } : undefined;
-
-    // ---- Create or reuse customer (email optional) ----
-    let customer = null;
-    if (email){
-      const { data } = await stripe.customers.list({ email, limit: 1 });
-      customer = data[0] || (await stripe.customers.create({
-        email, name, address: billingAddress, shipping, metadata: safeMeta
-      }));
-    } else {
-      customer = await stripe.customers.create({
-        name: name || null, address: billingAddress, shipping, metadata: safeMeta
-      });
-    }
-
-    // Store intended price info on customer for reference
-    await stripe.customers.update(customer.id, {
-      name: name || undefined,
-      address: billingAddress,
-      shipping,
-      metadata: {
-        ...(customer.metadata || {}),
-        last_intended_price_pence: String(pricePence),
-        last_intended_price_currency: priceCurrency,
-        last_intended_price_display: priceDisplay || ''
-      }
+    // Pull SI with expansions so we can show saved card + customer info
+    const si = await stripe.setupIntents.retrieve(id, {
+      expand: ['payment_method', 'customer']
     });
 
-    // Compose metadata for SetupIntent
-    const meta = {
-      ...safeMeta,
-      order_summary: orderSummary || 'We’ll charge this card when your order ships.',
-      intended_price_pence: String(pricePence),
-      intended_price_currency: priceCurrency,
-      intended_price_display: priceDisplay
-    };
-
-    // ---- Create SetupIntent (so we have the ID for Order Link) ----
-    const setupIntent = await stripe.setupIntents.create({
-      customer: customer.id,
-      usage: 'off_session',
-      payment_method_types: ['card','link'],
-      metadata: meta
-    });
-
-    // ---- Create Billing Portal session (Portal Link) ----
-    let portalUrl = '';
-    try{
-      const portal = await stripe.billingPortal.sessions.create({
-        customer: customer.id,
-        return_url: 'https://wipeuranus.com/#success'
-      });
-      portalUrl = portal?.url || '';
-    }catch(e){
-      console.warn(`[SETUP-EMBED+KIT][${_rid}] Billing Portal create failed: ${e.message}`);
+    // If user cancelled at Stripe, tell the UI via 410
+    if (si.status === 'canceled') {
+      return res.status(410).json({ error: 'SetupIntent cancelled' });
     }
 
-    // ---- Build links for Kit ----
-    const orderLink = `https://wipeuranus.com/?order_ref=${encodeURIComponent(setupIntent.id)}#success`;
-    const orderLabel = priceDisplay ? `Intended: ${priceDisplay} (${priceCurrency.toUpperCase()})` : 'Intended: n/a';
+    // Pull metadata you set during create
+    const md = si.metadata || {};
+    const selectedPack   = pick(md.selectedPack);
+    const peopleKey      = pick(md.peopleKey);
+    const shipDelay      = pick(md.shipDelay);
+    const order_summary  = pick(md.order_summary);
+    const coupon_code    = pick(md.coupon);
 
-    // ---- Prepare field values from metadata ----
-    const pack = safeMeta.selectedPack || '';
-    const subscriberYesNo = safeMeta.subscriber_yes_no ||
-                            ((safeMeta.mode === 'subscription') ? 'Yes' : 'No');
-    const subscriptionFreq = safeMeta.subscription_freq || '';
-    const fullName = name || '';
-    const preorderStatus = 'Ordered';
+    // Intended price snapshot (you stored these on SI metadata)
+    // Fallbacks in case they’re missing.
+    const intended_price_pence   = Number.isFinite(+md.intended_price_pence)   ? +md.intended_price_pence   : undefined;
+    const intended_price_display = pick(md.intended_price_display);
+    const currency = pick(md.intended_price_currency) || 'gbp';
 
-    // Initial “Customer” flag — you can flip to "Yes" upon fulfilment/capture
-    const customerYesNo = 'No';
+    // Plan mode
+    const rawMode  = pick(md.mode) || '';
+    const planMode = (rawMode === 'subscription' ? 'subscription'
+                    : rawMode === 'payment'      ? 'payment'
+                    : 'subscription');
 
-    // ---- KIT (only if email present & key configured) ----
-    if (email && process.env.KIT_API_KEY){
-      try{
-        // Ensure all your labels exist and get their "key" values
-        const LABELS = [
-          'Customer',
-          'Full Name',
-          'Order Label',
-          'Order Link',
-          'Pack',
-          'Portal Link',
-          'Preorder Status',
-          'Subscriber',
-          'SubscriptionFreq'
-        ];
-        const keys = await Promise.all(LABELS.map(kitEnsureCustomField));
-        const [
-          CUSTOMER_KEY,
-          FULLNAME_KEY,
-          ORDERLABEL_KEY,
-          ORDERLINK_KEY,
-          PACK_KEY,
-          PORTAL_KEY,
-          PREORDER_KEY,
-          SUBSCRIBER_KEY,
-          SUBFREQ_KEY
-        ] = keys;
+    // Saved card details
+    let saved_card = null;
+    if (si.payment_method && si.payment_method.card) {
+      const c = si.payment_method.card;
+      saved_card = {
+        id: si.payment_method.id,
+        brand: c.brand,
+        last4: c.last4,
+        exp_month: c.exp_month,
+        exp_year: c.exp_year
+      };
+    }
 
-        const fieldsByKey = {
-          [CUSTOMER_KEY]: customerYesNo,
-          [FULLNAME_KEY]: fullName,
-          [ORDERLABEL_KEY]: orderLabel,
-          [ORDERLINK_KEY]: orderLink,
-          [PACK_KEY]: String(pack),
-          [PORTAL_KEY]: portalUrl || '',       // empty if portal failed; that’s okay
-          [PREORDER_KEY]: preorderStatus,
-          [SUBSCRIBER_KEY]: subscriberYesNo,
-          [SUBFREQ_KEY]: subscriptionFreq
+    // Customer info
+    const customer_id = typeof si.customer === 'string' ? si.customer : si.customer?.id;
+    // Try to build a shipping block.
+    let shipping = undefined;
+    let customer_name = undefined;
+
+    // Prefer Customer’s shipping/name if present
+    if (si.customer && typeof si.customer === 'object') {
+      const cust = si.customer;
+      customer_name = cust.name || undefined;
+      if (cust.shipping) {
+        shipping = {
+          name: cust.shipping.name || cust.name || '',
+          address: {
+            line1: cust.shipping.address?.line1 || '',
+            line2: cust.shipping.address?.line2 || '',
+            city: cust.shipping.address?.city || '',
+            postal_code: cust.shipping.address?.postal_code || '',
+            country: cust.shipping.address?.country || ''
+          }
         };
-
-        // Create or update subscriber
-        const createdId = await kitCreateOrUpdateSubscriber({
-          email,
-          first_name: (fullName.split(' ')[0] || ''),
-          fields: fieldsByKey
-        });
-
-        const subId = createdId || (await kitGetSubscriberIdByEmail(email));
-        if (subId){ await kitUpdateSubscriber(subId, { fields: fieldsByKey }); }
-
-        // Optional: add to sequence
-        const SEQUENCE_ID = process.env.KIT_SEQUENCE_ID_ORDERLINK;
-        if (SEQUENCE_ID){
-          await kitAddToSequence({ sequenceId: SEQUENCE_ID, email });
-        } else {
-          console.warn(`[SETUP-EMBED+KIT][${_rid}] Skipped sequence: missing KIT_SEQUENCE_ID_ORDERLINK`);
-        }
-      }catch(e){
-        console.warn(`[SETUP-EMBED+KIT][${_rid}] KIT update skipped: ${e.message}`);
+      } else if (cust.address) {
+        shipping = {
+          name: cust.name || '',
+          address: {
+            line1: cust.address?.line1 || '',
+            line2: cust.address?.line2 || '',
+            city: cust.address?.city || '',
+            postal_code: cust.address?.postal_code || '',
+            country: cust.address?.country || ''
+          }
+        };
       }
-    } else {
-      if (!email) console.warn(`[SETUP-EMBED+KIT][${_rid}] No email provided; skipping Kit fields`);
-      if (!process.env.KIT_API_KEY) console.warn(`[SETUP-EMBED+KIT][${_rid}] No KIT_API_KEY; skipping Kit fields`);
     }
 
-    console.log(`[SETUP-EMBED+KIT][${_rid}] SetupIntent created id=${setupIntent.id}`);
-    return res.status(200).json({ client_secret: setupIntent.client_secret, customer_id: customer.id });
+    // Response in the exact shape the success page expects
+    return res.status(200).json({
+      id: si.id,
+      status: si.status,
+      currency,
+
+      // selection & plan
+      selectedPack: selectedPack || undefined,
+      peopleKey: peopleKey || undefined,
+      shipDelay: shipDelay || undefined,
+      planMode,
+
+      // labels / pricing snapshot
+      order_summary: order_summary || undefined,
+      intended_price_pence,
+      intended_price_display,
+      coupon_code,
+
+      // customer + saved card
+      customer_id: customer_id || undefined,
+      customer_name: customer_name || undefined,
+      shipping: shipping || undefined,
+      saved_card: saved_card || undefined,
+
+      // You can add preorder_status if you store it somewhere; default to pending
+      preorder_status: 'pending'
+    });
 
   }catch(e){
-    console.error(`[SETUP-EMBED+KIT][${_rid}] ERROR ${e.type || ''} ${e.message}`);
-    if (e.raw && e.raw.param) console.error(`[SETUP-EMBED+KIT][${_rid}] Stripe param error -> ${e.raw.param}`);
-    console.error(`[SETUP-EMBED+KIT][${_rid}] STACK\n${e.stack}`);
-    return res.status(500).json({ error:e.message, rid:_rid });
-  }finally{
-    console.log(`[SETUP-EMBED+KIT][${_rid}] END`);
+    console.error('[GET-SI]['+_rid+']', e);
+    const code = (e && e.statusCode) || 500;
+    return res.status(code).json({ error: e.message || 'Error' });
   }
 };
