@@ -61,6 +61,26 @@ async function kitUpdateSubscriber(id, payload){
   const json = JSON.parse(txt);
   return json?.subscriber;
 }
+// NEW: tags
+async function kitEnsureTag(name){
+  if (process.env.KIT_TAG_ID_CUSTOMER && name.toLowerCase() === 'customer') {
+    return process.env.KIT_TAG_ID_CUSTOMER;
+  }
+  const resp = await fetch(`${KIT_API_BASE}/tags`, {
+    method:'POST', headers: KIT_HEADERS, body: JSON.stringify({ name })
+  });
+  const txt = await resp.text();
+  if (!resp.ok) throw new Error(`Kit ensure tag "${name}" failed: ${txt}`);
+  const json = JSON.parse(txt);
+  return json?.tag?.id;
+}
+async function kitTagSubscriber({ tagId, email }){
+  if (!tagId) return;
+  const resp = await fetch(`${KIT_API_BASE}/tags/${tagId}/subscribers`, {
+    method:'POST', headers: KIT_HEADERS, body: JSON.stringify({ email_address: email })
+  });
+  if (!resp.ok) throw new Error(`Kit tag subscriber failed: ${await resp.text()}`);
+}
 
 module.exports = async (req, res) => {
   const _rid = rid();
@@ -192,6 +212,17 @@ module.exports = async (req, res) => {
 
         const subId = createdId || (await kitGetSubscriberIdByEmail(pick(email)));
         if (subId) await kitUpdateSubscriber(subId, { fields: fieldsByKey });
+
+        // NEW: ensure + apply "customer" tag
+        try{
+          const tagName = 'customer';
+          const tagId = process.env.KIT_TAG_ID_CUSTOMER || await kitEnsureTag(tagName);
+          console.log(`[UPDATE-CUSTOMER] applying tag "${tagName}" (id=${tagId}) to ${email}`);
+          await kitTagSubscriber({ tagId, email: pick(email) });
+        }catch(tagErr){
+          console.warn(`[UPDATE-CUSTOMER][${_rid}] Tag step skipped: ${tagErr.message}`);
+        }
+
       }catch(e){
         console.warn(`[UPDATE-CUSTOMER][${_rid}] Kit update skipped: ${e.message}`);
       }
