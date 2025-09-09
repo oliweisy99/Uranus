@@ -101,7 +101,8 @@ module.exports = async (req, res) => {
       order_ref,                         // SetupIntent id (e.g., si_...)
       intended_price_display,            // e.g., "£26.21"
       intended_price_currency,           // e.g., "gbp"
-      meta                               // { selectedPack, mode, subscriber_yes_no, subscription_freq, delivery_label }
+      meta,                               // { selectedPack, mode, subscriber_yes_no, subscription_freq, delivery_label }
+      payment_method_id
     } = req.body || {};
 
     if (!customer_id) return res.status(400).json({ error:'customer_id required' });
@@ -139,6 +140,18 @@ module.exports = async (req, res) => {
 
     if (Object.keys(payload).length){
       await stripe.customers.update(customer_id, payload);
+    }
+
+    if (payment_method_id) {
+      try {
+        await stripe.paymentMethods.attach(payment_method_id, { customer: customer_id });
+      }  catch (e) {
+       // ignore "already attached" error; important when confirmSetup already attached it
+           if (e?.code !== 'resource_already_exists') throw e;
+         } 
+         await stripe.customers.update(customer_id, {
+           invoice_settings: { default_payment_method: payment_method_id }
+         });
     }
 
     // --- Derive Kit field values ---
