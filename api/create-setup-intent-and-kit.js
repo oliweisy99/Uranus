@@ -119,7 +119,7 @@ module.exports = async (req,res)=>{
       }));
     } else {
       customer = await stripe.customers.create({
-        name: name || null, address: billingAddress, shipping, metadata: safeMeta
+        name: name || null, address: billingAddress, shipping,metadata: { ...safeMeta, provisional: 'true' }
       });
     }
 
@@ -184,7 +184,7 @@ module.exports = async (req,res)=>{
     }
 
     console.log(`[SETUP-EMBED+KIT][${_rid}] SetupIntent created id=${setupIntent.id}`);
-    return res.status(200).json({ client_secret: setupIntent.client_secret, customer_id: customer.id });
+    return res.status(200).json({ client_secret: setupIntent.client_secret, customer_id: customer.id, setup_intent_id: setupIntent.id });
 
   }catch(e){
     console.error(`[SETUP-EMBED+KIT][${_rid}] ERROR ${e.type || ''} ${e.message}`);
