@@ -61,7 +61,6 @@ async function kitUpdateSubscriber(id, payload){
   const json = JSON.parse(txt);
   return json?.subscriber;
 }
-// NEW: tags
 async function kitEnsureTag(name){
   if (process.env.KIT_TAG_ID_CUSTOMER && name.toLowerCase() === 'customer') {
     return process.env.KIT_TAG_ID_CUSTOMER;
@@ -93,21 +92,21 @@ module.exports = async (req, res) => {
 
   try{
     const {
-      customer_id,
+      customer_id,               // optional now
       email, name, phone,
-      address,   // { line1, line2, city, postal_code, country }
-      shipping,  // { name, phone, address: { ... } }
-      // NEW optional fields so we can populate Kit fully:
-      order_ref,                         // SetupIntent id (e.g., si_...)
-      intended_price_display,            // e.g., "£26.21"
-      intended_price_currency,           // e.g., "gbp"
-      meta,                               // { selectedPack, mode, subscriber_yes_no, subscription_freq, delivery_label }
-      payment_method_id
+      address,                   // { line1, line2, city, postal_code, country }
+      shipping,                  // { name, phone, address: { ... } }
+      order_ref,                 // SetupIntent id (e.g., si_...)
+      intended_price_display,    // e.g., "£26.21"
+      intended_price_currency,   // e.g., "gbp"
+      meta,                      // { selectedPack, mode, subscriber_yes_no, subscription_freq, delivery_label }
+      payment_method_id          // REQUIRED to attach as default
     } = req.body || {};
 
-    if (!customer_id) return res.status(400).json({ error:'customer_id required' });
+    // We'll create a customer on demand if one wasn't provided.
+    let cid = customer_id;
 
-    // --- Update Stripe customer first (only defined fields) ---
+    // Build Stripe customer payload from provided fields
     const payload = {};
     if (pick(email)) payload.email = pick(email);
     if (pick(name))  payload.name  = pick(name);
@@ -138,20 +137,32 @@ module.exports = async (req, res) => {
       if (Object.keys(s).length) payload.shipping = s;
     }
 
-    if (Object.keys(payload).length){
-      await stripe.customers.update(customer_id, payload);
+    if (!cid) {
+      // Create the real customer now that the user actually submitted details
+      const created = await stripe.customers.create({
+        ...(Object.keys(payload).length ? payload : {}),
+        metadata: {
+          ...(meta || {}),
+          created_via: 'carrd-elements',
+        }
+      });
+      cid = created.id;
+    } else if (Object.keys(payload).length){
+      await stripe.customers.update(cid, payload);
     }
 
+    // Attach + set default payment method
     if (payment_method_id) {
       try {
-        await stripe.paymentMethods.attach(payment_method_id, { customer: customer_id });
+        await stripe.paymentMethods.attach(payment_method_id, { customer: cid });
       }  catch (e) {
-       // ignore "already attached" error; important when confirmSetup already attached it
-           if (e?.code !== 'resource_already_exists') throw e;
-         } 
-         await stripe.customers.update(customer_id, {
-           invoice_settings: { default_payment_method: payment_method_id }
-         });
+        if (e?.code !== 'resource_already_exists') throw e;
+      }
+      await stripe.customers.update(cid, {
+        invoice_settings: { default_payment_method: payment_method_id }
+      });
+    } else {
+      return res.status(400).json({ error: 'payment_method_id is required' });
     }
 
     // --- Derive Kit field values ---
@@ -165,13 +176,13 @@ module.exports = async (req, res) => {
     const orderLabel = priceDisplay ? `Intended: ${priceDisplay} (${priceCurrency})` : 'Intended: n/a';
     const orderLink = order_ref ? `https://wipeuranus.com/?order_ref=${encodeURIComponent(order_ref)}#success` : '';
     const preorderStatus = 'Ordered';
-    const customerFlag = 'No'; // set "Yes" later when you actually charge/fulfil
+    const customerFlag = 'Yes'; // mark as real customer after successful save
 
     // Create a Billing Portal session for "Portal Link"
     let portalUrl = '';
     try{
       const portal = await stripe.billingPortal.sessions.create({
-        customer: customer_id,
+        customer: cid,
         return_url: 'https://wipeuranus.com/#success'
       });
       portalUrl = portal?.url || '';
@@ -226,11 +237,11 @@ module.exports = async (req, res) => {
         const subId = createdId || (await kitGetSubscriberIdByEmail(pick(email)));
         if (subId) await kitUpdateSubscriber(subId, { fields: fieldsByKey });
 
-        // NEW: ensure + apply "customer" tag
+        // ensure + apply "customer" tag
         try{
           const tagName = 'customer';
           const tagId = process.env.KIT_TAG_ID_CUSTOMER || await kitEnsureTag(tagName);
-          console.log(`[UPDATE-CUSTOMER] applying tag "${tagName}" (id=${tagId}) to ${email}`);
+          console.log(`[UPDATE-CUSTOMER][${_rid}] applying tag "${tagName}" (id=${tagId}) to ${email}`);
           await kitTagSubscriber({ tagId, email: pick(email) });
         }catch(tagErr){
           console.warn(`[UPDATE-CUSTOMER][${_rid}] Tag step skipped: ${tagErr.message}`);
@@ -245,7 +256,7 @@ module.exports = async (req, res) => {
     }
 
     console.log(`[UPDATE-CUSTOMER][${_rid}] OK`);
-    return res.status(200).json({ ok:true, portal_url: portalUrl });
+    return res.status(200).json({ ok:true, portal_url: portalUrl, customer_id: cid });
 
   }catch(e){
     console.error(`[UPDATE-CUSTOMER][${_rid}] ERROR`, e);
