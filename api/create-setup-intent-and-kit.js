@@ -96,45 +96,10 @@ module.exports = async (req,res)=>{
       intended_price_pence, intended_price_currency, intended_price_display
     } = req.body || {};
 
-    // NOTE: email is OPTIONAL now (to allow immediate PE mount)
     const safeMeta = sanitizeMetadata(metadata);
     const pricePence = Number.isFinite(+intended_price_pence) ? Math.max(0, Math.floor(+intended_price_pence)) : 0;
     const priceCurrency = (intended_price_currency || 'gbp').toLowerCase();
     const priceDisplay = intended_price_display ? String(intended_price_display) : '';
-
-    const billingAddress = shipping?.address ? {
-      line1: shipping.address.line1 || null,
-      line2: shipping.address.line2 || null,
-      city: shipping.address.city || null,
-      postal_code: shipping.address.postal_code || null,
-      country: shipping.address.country || 'GB'
-    } : undefined;
-
-    // Stripe customer: find by email if provided, else create anonymous
-    let customer = null;
-    if (email){
-      const { data } = await stripe.customers.list({ email, limit: 1 });
-      customer = data[0] || (await stripe.customers.create({
-        email, name, address: billingAddress, shipping, metadata: safeMeta
-      }));
-    } else {
-      customer = await stripe.customers.create({
-        name: name || null, address: billingAddress, shipping,metadata: { ...safeMeta, provisional: 'true' }
-      });
-    }
-
-    // store intended price info on customer
-    await stripe.customers.update(customer.id, {
-      name: name || undefined,
-      address: billingAddress,
-      shipping,
-      metadata: {
-        ...(customer.metadata || {}),
-        last_intended_price_pence: String(pricePence),
-        last_intended_price_currency: priceCurrency,
-        last_intended_price_display: priceDisplay || ''
-      }
-    });
 
     const meta = {
       ...safeMeta,
@@ -144,15 +109,14 @@ module.exports = async (req,res)=>{
       intended_price_display: priceDisplay
     };
 
-    // Create SetupIntent
+    // Create SetupIntent WITHOUT a customer; customer will be created only after user confirms.
     const setupIntent = await stripe.setupIntents.create({
-      customer: customer.id,
       usage: 'off_session',
       payment_method_types: ['card','link'],
       metadata: meta
     });
 
-    // ---- KIT (only if email present) ----
+    // ---- KIT (optional; only if email present) ----
     if (email && process.env.KIT_API_KEY){
       try{
         const LABELS = ['Portal Link','Order Label'];
@@ -184,7 +148,10 @@ module.exports = async (req,res)=>{
     }
 
     console.log(`[SETUP-EMBED+KIT][${_rid}] SetupIntent created id=${setupIntent.id}`);
-    return res.status(200).json({ client_secret: setupIntent.client_secret, customer_id: customer.id, setup_intent_id: setupIntent.id });
+    return res.status(200).json({
+      client_secret: setupIntent.client_secret,
+      setup_intent_id: setupIntent.id
+    });
 
   }catch(e){
     console.error(`[SETUP-EMBED+KIT][${_rid}] ERROR ${e.type || ''} ${e.message}`);
